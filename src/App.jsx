@@ -294,9 +294,42 @@ function App() {
         for (let d = 1; d <= numDays; d++) {
             const dayPlaces = itinerary[d] || [];
             dayPlaces.forEach(item => {
-                flowItems.push({ ...item, day: d, type: 'destination' });
+                // Break each destination into atomic parts for better space utilization/splitting
+                // 1. Header and Images Part
+                flowItems.push({
+                    type: 'dest-head',
+                    ...item,
+                    day: d,
+                    destId: item.id
+                });
+
+                // 2. Paragraph Parts
+                const paragraphs = (item.description || '').split('\n').filter(p => p.trim());
+                paragraphs.forEach((p, pIdx) => {
+                    flowItems.push({
+                        type: 'dest-para',
+                        text: p,
+                        day: d,
+                        destId: item.id,
+                        name: item.name,
+                        title: item.title,
+                        isFirstPara: pIdx === 0
+                    });
+                });
+
+                // 3. Highlights Part
+                if (item.selectedSubPlaces && item.selectedSubPlaces.length > 0) {
+                    flowItems.push({
+                        type: 'dest-highlights',
+                        highlights: item.selectedSubPlaces,
+                        day: d,
+                        destId: item.id,
+                        name: item.name,
+                        title: item.title
+                    });
+                }
             });
-            // Move special highlights note AFTER the day's destinations
+
             if (showDayNote[d] && dayNoteText[d]) {
                 flowItems.push({ day: d, text: dayNoteText[d], type: 'dayNote', id: `day-note-${d}` });
             }
@@ -307,33 +340,33 @@ function App() {
         let currentPageWeight = 0;
 
         flowItems.forEach((item, index) => {
-            // Assign dynamic weight: destinations are bulkier than day note boxes
             let weight = 0;
             if (item.type === 'dayNote') {
                 const linesRaw = (item.text || '').split('\n').filter(l => l.trim());
                 let estimatedLines = 0;
                 linesRaw.forEach(l => {
-                    estimatedLines += Math.max(1, Math.ceil(l.length / 75)); // Approx 75 chars per line in box
+                    estimatedLines += Math.max(1, Math.ceil(l.length / 75));
                 });
-                weight = 1.1 + (estimatedLines * 0.35); // Base weight for box + line impact
-            } else {
-                const descLen = (item.description || '').length || 0;
-                weight = 1.7 + (descLen / 450);
-                if (item.image2) weight += 0.5;
-                if (item.selectedSubPlaces?.length > 0) {
-                    item.selectedSubPlaces.forEach(sub => {
-                        weight += 0.15; // Base for name
-                        const descText = typeof sub === 'string' ? '' : (sub.description || '');
-                        if (descText) {
-                            // Approximately count lines: ~60 chars per line in the description block in PDF
-                            weight += 0.05 + (Math.ceil(descText.length / 60) * 0.1);
-                        }
-                    });
-                }
+                weight = 1.0 + (estimatedLines * 0.35);
+            } else if (item.type === 'dest-head') {
+                weight = 1.6; // Header + Images base
+                if (item.image2) weight += 0.4;
+            } else if (item.type === 'dest-para') {
+                weight = Math.max(0.15, (item.text || '').length / 500);
+            } else if (item.type === 'dest-highlights') {
+                weight = 0.2; // Base
+                item.highlights.forEach(sub => {
+                    weight += 0.15;
+                    const descText = typeof sub === 'string' ? '' : (sub.description || '');
+                    if (descText) {
+                        weight += 0.05 + (Math.ceil(descText.length / 60) * 0.1);
+                    }
+                });
             }
 
             const isFirstPage = pages.length === 0;
-            const maxWeight = isFirstPage ? 2.7 : 4.4; // Slightly more conservative for safety
+            // First page has header/welcome which takes weight, so we lower maxWeight for items
+            const maxWeight = isFirstPage ? 3.0 : 4.4;
 
             if (currentPageWeight + weight > maxWeight && currentPage.length > 0) {
                 pages.push([...currentPage]);
@@ -1503,81 +1536,121 @@ const PDFContent = ({ pages, arrivalDate, departureDate, tripStart, tripEnd, cus
                         )}
 
                         <div className="pdf-itinerary-list">
-                            {items.map((item, idx) => {
-                                if (item.type === 'dayNote') {
+                            {(() => {
+                                const grouped = [];
+                                let currentGroup = null;
+
+                                items.forEach(item => {
+                                    if (item.type === 'dayNote') {
+                                        if (currentGroup) {
+                                            grouped.push(currentGroup);
+                                            currentGroup = null;
+                                        }
+                                        grouped.push(item);
+                                    } else {
+                                        // destination part
+                                        if (currentGroup && currentGroup.destId === item.destId) {
+                                            currentGroup.parts.push(item);
+                                        } else {
+                                            if (currentGroup) grouped.push(currentGroup);
+                                            currentGroup = {
+                                                type: 'dest-group',
+                                                destId: item.destId,
+                                                parts: [item],
+                                                sample: item
+                                            };
+                                        }
+                                    }
+                                });
+                                if (currentGroup) grouped.push(currentGroup);
+
+                                return grouped.map((group, gIdx) => {
+                                    if (group.type === 'dayNote') {
+                                        return (
+                                            <div key={group.id} className="pdf-day-general-note" style={{ background: '#fff9e6', border: '1.5px solid black', padding: '15px', borderRadius: '10px', marginBottom: '25px' }}>
+                                                <div style={{ color: '#000', fontSize: '1rem', fontWeight: 'bold', marginBottom: '8px', textTransform: 'uppercase' }}>DAY {group.day} SPECIAL HIGHLIGHTS</div>
+                                                <ul style={{ listStyleType: 'disc', paddingLeft: '20px', fontSize: '1.05rem', color: '#1a202c', lineHeight: '1.6', margin: 0 }}>
+                                                    {(group.text || '').split('\n').filter(line => line.trim()).map((line, i) => (
+                                                        <li key={i} style={{ marginBottom: '5px', wordBreak: 'break-word', overflowWrap: 'break-word', whiteSpace: 'normal' }}>{line.trim()}</li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        );
+                                    }
+
+                                    const hasHead = group.parts.some(p => p.type === 'dest-head');
+                                    const headItem = group.parts.find(p => p.type === 'dest-head');
+                                    const dayText = `DAY ${String(group.sample.day).padStart(2, '0')}`;
+
                                     return (
-                                        <div key={item.id} className="pdf-day-general-note" style={{ background: '#fff9e6', border: '1.5px solid black', padding: '15px', borderRadius: '10px', marginBottom: '25px' }}>
-                                            <div style={{ color: '#000', fontSize: '1rem', fontWeight: 'bold', marginBottom: '8px', textTransform: 'uppercase' }}>DAY {item.day} SPECIAL HIGHLIGHTS</div>
-                                            <ul style={{ listStyleType: 'disc', paddingLeft: '20px', fontSize: '1.05rem', color: '#1a202c', lineHeight: '1.6', margin: 0 }}>
-                                                {(item.text || '').split('\n').filter(line => line.trim()).map((line, i) => (
-                                                    <li key={i} style={{ marginBottom: '5px', wordBreak: 'break-word', overflowWrap: 'break-word', whiteSpace: 'normal' }}>{line.trim()}</li>
-                                                ))}
-                                            </ul>
+                                        <div key={`${group.destId}-${gIdx}`} className="pdf-day-item">
+                                            <div className="pdf-day-header">
+                                                <div className="day-number" style={{ fontSize: '2.5rem', whiteSpace: 'nowrap' }}>
+                                                    {dayText}
+                                                </div>
+                                                <div className="day-title-wrapper">
+                                                    <h2 style={{ fontSize: '2.2rem' }}>
+                                                        {group.sample.name} {!hasHead && <span style={{ fontSize: '1.1rem', opacity: 0.6, fontWeight: 'normal', marginLeft: '10px' }}>(continued)</span>}
+                                                    </h2>
+                                                    {hasHead && <div className="day-subtitle">{headItem.title}</div>}
+                                                </div>
+                                            </div>
+
+                                            <div className="pdf-day-content">
+                                                <div className="pdf-day-image-wrapper">
+                                                    {hasHead && (
+                                                        <>
+                                                            <img
+                                                                src={customImages[headItem.destId] || headItem.image}
+                                                                alt={headItem.name}
+                                                                className="pdf-day-image"
+                                                                style={{ height: headItem.image2 ? '135px' : '200px', marginBottom: headItem.image2 ? '10px' : '0' }}
+                                                            />
+                                                            {headItem.image2 && (
+                                                                <img
+                                                                    src={customImages[`${headItem.destId}-2`] || headItem.image2}
+                                                                    alt={`${headItem.name} 2`}
+                                                                    className="pdf-day-image"
+                                                                    style={{ height: '135px' }}
+                                                                />
+                                                            )}
+                                                        </>
+                                                    )}
+                                                </div>
+                                                <div className="pdf-day-description" style={{ flex: 1 }}>
+                                                    {group.parts.filter(p => p.type === 'dest-para').map((para, pIdx) => (
+                                                        <p key={pIdx} style={{ marginBottom: '8px' }}>{para.text}</p>
+                                                    ))}
+
+                                                    {group.parts.filter(p => p.type === 'dest-highlights').map((hl, hIdx) => (
+                                                        <div key={hIdx} className="pdf-sub-places" style={{ marginTop: '10px' }}>
+                                                            <ul style={{ listStyleType: 'disc', paddingLeft: '20px' }}>
+                                                                {hl.highlights.map((sub, sIdx) => {
+                                                                    const rawSubName = typeof sub === 'string' ? sub : sub.name;
+                                                                    const subName = rawSubName.charAt(0).toUpperCase() + rawSubName.slice(1).toLowerCase();
+                                                                    const subDesc = typeof sub === 'string' ? '' : sub.description;
+                                                                    return (
+                                                                        <li key={sIdx} style={{ marginBottom: '10px', lineHeight: '1.5' }}>
+                                                                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                                                <span style={{ fontWeight: '700', color: '#1a365d', fontSize: '0.9rem' }}>{subName}</span>
+                                                                                {subDesc && (
+                                                                                    <div style={{ fontSize: '0.85rem', color: '#4a5568', marginTop: '4px', lineHeight: '1.4', wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                                                                                        {subDesc}
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                        </li>
+                                                                    );
+                                                                })}
+                                                            </ul>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
                                         </div>
                                     );
-                                }
-
-                                const dayText = `DAY ${String(item.day).padStart(2, '0')}`;
-                                return (
-                                    <div key={`${item.id}-${idx}`} className="pdf-day-item">
-                                        <div className="pdf-day-header">
-                                            <div className="day-number" style={{ fontSize: '2.5rem', whiteSpace: 'nowrap' }}>
-                                                {dayText}
-                                            </div>
-                                            <div className="day-title-wrapper">
-                                                <h2 style={{ fontSize: '2.2rem' }}>{item.name}</h2>
-                                                <div className="day-subtitle">{item.title}</div>
-                                            </div>
-                                        </div>
-
-                                        <div className="pdf-day-content">
-                                            <div className="pdf-day-image-wrapper">
-                                                <img
-                                                    src={customImages[item.id] || item.image}
-                                                    alt={item.name}
-                                                    className="pdf-day-image"
-                                                    style={{ height: item.image2 ? '135px' : '200px', marginBottom: item.image2 ? '10px' : '0' }}
-                                                />
-                                                {item.image2 && (
-                                                    <img
-                                                        src={customImages[`${item.id}-2`] || item.image2}
-                                                        alt={`${item.name} 2`}
-                                                        className="pdf-day-image"
-                                                        style={{ height: '135px' }}
-                                                    />
-                                                )}
-                                            </div>
-                                            <div className="pdf-day-description">
-                                                <p>{item.description}</p>
-
-                                                {item.selectedSubPlaces && item.selectedSubPlaces.length > 0 && (
-                                                    <div className="pdf-sub-places" style={{ marginTop: '10px' }}>
-                                                        <ul style={{ listStyleType: 'disc', paddingLeft: '20px' }}>
-                                                            {item.selectedSubPlaces.map((sub, sIdx) => {
-                                                                const rawSubName = typeof sub === 'string' ? sub : sub.name;
-                                                                const subName = rawSubName.charAt(0).toUpperCase() + rawSubName.slice(1).toLowerCase();
-                                                                const subDesc = typeof sub === 'string' ? '' : sub.description;
-                                                                return (
-                                                                    <li key={sIdx} style={{ marginBottom: '10px', lineHeight: '1.5' }}>
-                                                                        <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                                                            <span style={{ fontWeight: '700', color: '#1a365d', fontSize: '0.9rem' }}>{subName}</span>
-                                                                            {subDesc && (
-                                                                                <div style={{ fontSize: '0.85rem', color: '#4a5568', marginTop: '4px', lineHeight: '1.4', wordBreak: 'break-word', whiteSpace: 'normal' }}>
-                                                                                    {subDesc}
-                                                                                </div>
-                                                                            )}
-                                                                        </div>
-                                                                    </li>
-                                                                );
-                                                            })}
-                                                        </ul>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                );
-                            })}
+                                });
+                            })()}
                         </div>
 
 
