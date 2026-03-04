@@ -90,6 +90,8 @@ function App() {
         });
     });
     const [newPlace, setNewPlace] = useState({ name: '', title: '', description: '', image: null, image2: null, subPlaces: [] });
+    const [newSubPlace, setNewSubPlace] = useState({ name: '', description: '' });
+    const [newDayPoint, setNewDayPoint] = useState('');
     const [showPlaceForm, setShowPlaceForm] = useState(false);
     const [editingPlaceId, setEditingPlaceId] = useState(null);
     const [placesGallery, setPlacesGallery] = useState(galleryDataRaw);
@@ -185,21 +187,25 @@ function App() {
             setUserPlaces(prev => [...prev, p]);
         }
 
-        setNewPlace({ name: '', title: '', description: '', specialNote: '', image: null, image2: null, subPlaces: [] });
+        setNewPlace({ name: '', title: '', description: '', image: null, image2: null, subPlaces: [] });
         setShowPlaceForm(false);
         setEditingPlaceId(null);
     };
 
     const openEditModal = (e, place) => {
         e.stopPropagation();
+        // Convert any string-only subPlaces to objects for the new structured UI
+        const structuredSubPlaces = (place.subPlaces || []).map(sp =>
+            typeof sp === 'string' ? { name: sp, description: '' } : sp
+        );
+
         setNewPlace({
             name: place.name,
             title: place.title,
             description: place.description,
-            specialNote: place.specialNote || '',
             image: customImages[place.id] || place.image,
             image2: customImages[`${place.id}-2`] || place.image2,
-            subPlaces: place.subPlaces || []
+            subPlaces: structuredSubPlaces
         });
         setEditingPlaceId(place.id);
         setShowPlaceForm(true);
@@ -299,7 +305,12 @@ function App() {
                 const descLen = (item.description || '').length || 0;
                 weight = 1.7 + (descLen / 450);
                 if (item.image2) weight += 0.5;
-                if (item.selectedSubPlaces?.length > 0) weight += 0.3;
+                if (item.selectedSubPlaces?.length > 0) {
+                    item.selectedSubPlaces.forEach(sub => {
+                        weight += 0.15; // Base per item
+                        if (sub.description) weight += 0.12; // Extra for description line
+                    });
+                }
             }
 
             const isFirstPage = pages.length === 0;
@@ -707,13 +718,61 @@ function App() {
                                                     animate={{ opacity: 1, y: 0 }}
                                                     style={{ marginBottom: '25px', padding: '20px', background: '#fff9e6', borderRadius: '12px', border: '1px solid #ffeeba' }}
                                                 >
-                                                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '8px', color: '#856404' }}>General Itinerary Note for Day {activeDay}</label>
-                                                    <textarea
-                                                        placeholder="Enter special instructions or highlights for this day..."
-                                                        value={dayNoteText[activeDay] || ''}
-                                                        onChange={(e) => setDayNoteText(prev => ({ ...prev, [activeDay]: e.target.value }))}
-                                                        style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #ffeeba', fontSize: '0.9rem', minHeight: '80px', background: 'white' }}
-                                                    />
+                                                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '12px', color: '#856404' }}>General Itinerary Note for Day {activeDay} (Point by Point)</label>
+
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '15px' }}>
+                                                        {(dayNoteText[activeDay] || '').split('\n').filter(p => p.trim()).map((point, pIdx) => (
+                                                            <div key={pIdx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'white', padding: '10px 15px', borderRadius: '8px', border: '1px solid #ffeeba' }}>
+                                                                <span style={{ fontSize: '0.9rem', color: '#1a202c' }}>• {point}</span>
+                                                                <button
+                                                                    onClick={() => {
+                                                                        const points = (dayNoteText[activeDay] || '').split('\n');
+                                                                        points.splice(pIdx, 1);
+                                                                        setDayNoteText(prev => ({ ...prev, [activeDay]: points.join('\n') }));
+                                                                    }}
+                                                                    style={{ background: 'none', border: 'none', color: '#e53e3e', cursor: 'pointer', padding: '5px' }}
+                                                                >
+                                                                    <Trash2 size={16} />
+                                                                </button>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+
+                                                    <div style={{ display: 'flex', gap: '10px' }}>
+                                                        <textarea
+                                                            placeholder="Type a new highlight/note point... (Press Enter to add)"
+                                                            value={newDayPoint}
+                                                            onChange={(e) => setNewDayPoint(e.target.value)}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter' && !e.shiftKey) {
+                                                                    e.preventDefault();
+                                                                    if (!newDayPoint.trim()) return;
+                                                                    setDayNoteText(prev => {
+                                                                        const current = prev[activeDay] || '';
+                                                                        const updated = current ? current + '\n' + newDayPoint.trim() : newDayPoint.trim();
+                                                                        return { ...prev, [activeDay]: updated };
+                                                                    });
+                                                                    setNewDayPoint('');
+                                                                }
+                                                            }}
+                                                            style={{ flex: 1, padding: '12px', borderRadius: '8px', border: '1px solid #ffeeba', fontSize: '0.9rem', minHeight: '60px', background: 'white' }}
+                                                        />
+                                                        <button
+                                                            onClick={() => {
+                                                                if (!newDayPoint.trim()) return;
+                                                                setDayNoteText(prev => {
+                                                                    const current = prev[activeDay] || '';
+                                                                    const updated = current ? current + '\n' + newDayPoint.trim() : newDayPoint.trim();
+                                                                    return { ...prev, [activeDay]: updated };
+                                                                });
+                                                                setNewDayPoint('');
+                                                            }}
+                                                            className="btn btn-primary"
+                                                            style={{ alignSelf: 'flex-end', padding: '12px 20px', fontSize: '0.85rem' }}
+                                                        >
+                                                            Add Point
+                                                        </button>
+                                                    </div>
                                                 </motion.div>
                                             )}
 
@@ -1065,17 +1124,97 @@ function App() {
                                     </div>
                                 </div>
                                 <div className="form-group" style={{ padding: '0 20px 20px' }}>
-                                    <label>Special Places to Visit (Comma separated)</label>
-                                    <textarea
-                                        style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd', minHeight: '80px' }}
-                                        value={(newPlace.subPlaces || []).join(', ')}
-                                        onChange={(e) => {
-                                            const subs = e.target.value.split(',').map(s => s.trim()).filter(s => s !== '');
-                                            setNewPlace({ ...newPlace, subPlaces: subs });
-                                        }}
-                                        placeholder="e.g. Temple of the Tooth, Royal Botanical Garden, Kandy Lake..."
-                                        rows={3}
-                                    />
+                                    <label style={{ marginBottom: '15px', color: 'var(--primary)', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
+                                        Structured Special Places to Visit
+                                    </label>
+
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+                                        {(newPlace.subPlaces || []).map((sub, sIdx) => (
+                                            <div key={sIdx} style={{ background: '#f8fafc', padding: '12px 15px', borderRadius: '10px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '15px' }}>
+                                                <div style={{ flex: 1 }}>
+                                                    <div style={{ fontWeight: 'bold', fontSize: '0.9rem', color: 'var(--primary)', marginBottom: '4px' }}>{sub.name}</div>
+                                                    {sub.description && <div style={{ fontSize: '0.8rem', color: '#64748b', fontStyle: 'italic' }}>{sub.description}</div>}
+                                                </div>
+                                                <button
+                                                    onClick={() => {
+                                                        const updatedSubs = [...newPlace.subPlaces];
+                                                        updatedSubs.splice(sIdx, 1);
+                                                        setNewPlace({ ...newPlace, subPlaces: updatedSubs });
+                                                    }}
+                                                    style={{ background: '#fee2e2', color: '#ef4444', border: 'none', borderRadius: '50%', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                                                >
+                                                    <Trash2 size={14} />
+                                                </button>
+                                            </div>
+                                        ))}
+                                        {(!newPlace.subPlaces || newPlace.subPlaces.length === 0) && (
+                                            <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '0.85rem', background: '#f8fafc', borderRadius: '10px', border: '1px dashed #cbd5e1' }}>
+                                                No special places added yet. Add one below.
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div style={{ background: '#fff', padding: '15px', borderRadius: '12px', border: '2px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                        <div style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#475569' }}>Add New Place Detail</div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 2fr auto', gap: '12px', alignItems: 'flex-end' }}>
+                                            <div className="form-group" style={{ marginBottom: 0 }}>
+                                                <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginBottom: '4px' }}>PLACE NAME</div>
+                                                <input
+                                                    type="text"
+                                                    placeholder="e.g. Temple of Tooth"
+                                                    value={newSubPlace.name}
+                                                    onChange={(e) => setNewSubPlace({ ...newSubPlace, name: e.target.value })}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') {
+                                                            if (!newSubPlace.name.trim()) return;
+                                                            setNewPlace({
+                                                                ...newPlace,
+                                                                subPlaces: [...(newPlace.subPlaces || []), { ...newSubPlace }]
+                                                            });
+                                                            setNewSubPlace({ name: '', description: '' });
+                                                        }
+                                                    }}
+                                                    className="modern-input"
+                                                    style={{ padding: '10px 12px', fontSize: '0.85rem' }}
+                                                />
+                                            </div>
+                                            <div className="form-group" style={{ marginBottom: 0 }}>
+                                                <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginBottom: '4px' }}>SIMPLE DESCRIPTION</div>
+                                                <input
+                                                    type="text"
+                                                    placeholder="Short caption (optional)..."
+                                                    value={newSubPlace.description}
+                                                    onChange={(e) => setNewSubPlace({ ...newSubPlace, description: e.target.value })}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') {
+                                                            if (!newSubPlace.name.trim()) return;
+                                                            setNewPlace({
+                                                                ...newPlace,
+                                                                subPlaces: [...(newPlace.subPlaces || []), { ...newSubPlace }]
+                                                            });
+                                                            setNewSubPlace({ name: '', description: '' });
+                                                        }
+                                                    }}
+                                                    className="modern-input"
+                                                    style={{ padding: '10px 12px', fontSize: '0.85rem' }}
+                                                />
+                                            </div>
+                                            <button
+                                                onClick={() => {
+                                                    if (!newSubPlace.name.trim()) return;
+                                                    setNewPlace({
+                                                        ...newPlace,
+                                                        subPlaces: [...(newPlace.subPlaces || []), { ...newSubPlace }]
+                                                    });
+                                                    setNewSubPlace({ name: '', description: '' });
+                                                }}
+                                                className="btn btn-primary"
+                                                style={{ padding: '12px 20px', fontSize: '0.85rem' }}
+                                            >
+                                                <Plus size={18} />
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
@@ -1277,9 +1416,20 @@ const PDFContent = ({ pages, arrivalDate, departureDate, tripStart, tripEnd, cus
                                                 {item.selectedSubPlaces && item.selectedSubPlaces.length > 0 && (
                                                     <div className="pdf-sub-places" style={{ marginTop: '10px' }}>
                                                         <ul style={{ listStyleType: 'disc', paddingLeft: '20px', fontSize: '0.9rem', color: '#4a5568' }}>
-                                                            {item.selectedSubPlaces.map(sub => (
-                                                                <li key={sub} style={{ marginBottom: '4px' }}>{sub}</li>
-                                                            ))}
+                                                            {item.selectedSubPlaces.map((sub, sIdx) => {
+                                                                const subName = typeof sub === 'string' ? sub : sub.name;
+                                                                const subDesc = typeof sub === 'string' ? '' : sub.description;
+                                                                return (
+                                                                    <li key={sIdx} style={{ marginBottom: '6px', lineHeight: '1.4' }}>
+                                                                        <span style={{ fontWeight: '600', color: '#1a202c' }}>{subName}</span>
+                                                                        {subDesc && (
+                                                                            <span style={{ fontSize: '0.8rem', color: '#718096', fontStyle: 'italic', display: 'block', marginTop: '2px' }}>
+                                                                                {subDesc}
+                                                                            </span>
+                                                                        )}
+                                                                    </li>
+                                                                );
+                                                            })}
                                                         </ul>
                                                     </div>
                                                 )}
