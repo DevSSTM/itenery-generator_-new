@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Analytics } from "@vercel/analytics/react";
 
 import galleryDataRaw from './gallery_data.json';
+import { supabase } from './supabase';
 
 const CARD_STYLES = [
     { bg: 'linear-gradient(135deg, #fff5f5 0%, #ffe3e3 100%)', border: '#fca5a5', accent: '#e53e3e' }, // Red
@@ -384,6 +385,27 @@ function App() {
             minute: '2-digit',
             hour12: true
         }));
+
+        try {
+            // Save to Supabase
+            const { error } = await supabase
+                .from('itineraries')
+                .insert([
+                    {
+                        title: calculateTourHeading(),
+                        client_name: 'Client', // Or prompt/add field later
+                        num_days: numDays,
+                        itinerary_data: itinerary
+                    }
+                ]);
+
+            if (error) {
+                console.error("Error saving itinerary to database:", error);
+            }
+        } catch (dbError) {
+            console.error("Supabase exception:", dbError);
+        }
+
         // Higher delay to ensure all dynamic content and images are fully rendered
         setTimeout(async () => {
             try {
