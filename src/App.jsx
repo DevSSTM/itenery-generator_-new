@@ -490,8 +490,8 @@ function App() {
             }
 
             const isFirstPage = pages.length === 0;
-            // INCREASED Capacity to allow more cities per page
-            const maxWeight = isFirstPage ? 3.8 : 5.4;
+            // First page has the premium header and welcome text, so it needs less content weight capacity.
+            const maxWeight = isFirstPage ? 3.2 : 5.0;
 
             if (currentPageWeight + weight > maxWeight && currentPage.length > 0) {
                 pages.push([...currentPage]);

@@ -591,9 +591,8 @@ header {
     background: linear-gradient(135deg, #ffffff 0%, #fffdf5 50%, #fff9e6 100%);
     margin: 0 auto 30px auto;
     position: relative;
-    overflow: hidden;
-    /* Prevent content from pushing out and hiding the footer */
-    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.15);
+    overflow: hidden !important;
+    /* Strict clipping to prevent page height changes */
     display: flex;
     flex-direction: column;
     z-index: 1;
@@ -622,9 +621,11 @@ header {
 
 .pdf-page-inner {
     padding: 20px 40px 10px 40px;
-    height: 100%;
+    height: calc(100% - 30px);
+    /* Internal padding adjustment */
     display: flex;
     flex-direction: column;
+    justify-content: flex-start;
     background: rgba(255, 255, 255, 0.85);
     /* Solid-ish white for html2canvas stability */
     border-radius: 4px;
@@ -829,11 +830,14 @@ header {
 
 .pdf-footer-premium {
     margin-top: auto;
+    /* Push to bottom of flex container */
     padding-top: 15px;
     border-top: 2px solid var(--primary);
-    background: rgba(255, 255, 255, 0.6);
-    padding-bottom: 5px;
+    background: white;
+    /* Solid background to prevent overlap issues */
+    padding-bottom: 20px;
     z-index: 5;
+    position: relative;
 }
 
 .footer-top {
