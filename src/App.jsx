@@ -66,8 +66,6 @@ function App() {
     const [isGenerating, setIsGenerating] = useState(false);
     const [userPlaces, setUserPlaces] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
-    const [hasLoadedDraft, setHasLoadedDraft] = useState(false);
-    const [activeItineraryId, setActiveItineraryId] = useState(null);
     const [showDayNote, setShowDayNote] = useState({}); // { 1: true, 2: false }
     const [dayNoteText, setDayNoteText] = useState({}); // { 1: "Note for day 1" }
 
@@ -124,27 +122,10 @@ function App() {
                     }
                 }
 
-                // Fetch Latest Draft Itinerary
-                const { data: itinData, error: itinError } = await supabase
-                    .from('itineraries')
-                    .select('*')
-                    .eq('is_draft', true)
-                    .order('updated_at', { ascending: false })
-                    .limit(1);
 
-                if (!itinError && itinData && itinData.length > 0) {
-                    const draft = itinData[0];
-                    setActiveItineraryId(draft.id);
-                    setNumDays(draft.num_days);
-                    setItinerary(draft.itinerary_data);
-                    if (draft.arrival_date) setArrivalDate(draft.arrival_date);
-                    if (draft.departure_date) setDepartureDate(draft.departure_date);
-                }
-
-                setHasLoadedDraft(true);
             } catch (err) {
                 console.error("Error fetching initial data", err);
-                setHasLoadedDraft(true); // Proceed even on error to allow work
+
             }
         };
 
@@ -153,38 +134,6 @@ function App() {
         return () => clearTimeout(timer);
     }, []);
 
-    // Auto-save itinerary draft
-    React.useEffect(() => {
-        if (!hasLoadedDraft) return;
-
-        const saveDraft = async () => {
-            try {
-                const payload = {
-                    title: calculateTourHeading() || "Unnamed Itinerary",
-                    num_days: numDays,
-                    itinerary_data: itinerary,
-                    arrival_date: arrivalDate || null,
-                    departure_date: departureDate || null,
-                    is_draft: true,
-                    updated_at: new Date().toISOString()
-                };
-
-                if (activeItineraryId) {
-                    await supabase.from('itineraries').update(payload).eq('id', activeItineraryId);
-                } else {
-                    const { data, error } = await supabase.from('itineraries').insert([payload]).select();
-                    if (!error && data && data.length > 0) {
-                        setActiveItineraryId(data[0].id);
-                    }
-                }
-            } catch (e) {
-                console.error("Auto-save failed", e);
-            }
-        };
-
-        const timeoutId = setTimeout(saveDraft, 2000);
-        return () => clearTimeout(timeoutId);
-    }, [itinerary, numDays, arrivalDate, departureDate, hasLoadedDraft]);
 
     const [placesList, setPlacesList] = useState(() => {
         return places.map(p => {
@@ -456,12 +405,16 @@ function App() {
                 });
 
                 if (item.selectedSubPlaces && item.selectedSubPlaces.length > 0) {
-                    flowItems.push({
-                        type: 'dest-highlights',
-                        highlights: item.selectedSubPlaces,
-                        day: d,
-                        destId: item.id,
-                        name: item.name
+                    item.selectedSubPlaces.forEach((sub, subIdx) => {
+                        flowItems.push({
+                            type: 'dest-highlight-point',
+                            highlight: sub,
+                            isFirst: subIdx === 0,
+                            isLast: subIdx === item.selectedSubPlaces.length - 1,
+                            day: d,
+                            destId: item.id,
+                            name: item.name
+                        });
                     });
                 }
             });
@@ -485,8 +438,8 @@ function App() {
                 if (item.image2) weight += 0.3;
             } else if (item.type === 'dest-para') {
                 weight = Math.max(0.1, (item.text || '').length / 800);
-            } else if (item.type === 'dest-highlights') {
-                weight = 0.2 + (item.highlights.length * 0.12);
+            } else if (item.type === 'dest-highlight-point') {
+                weight = 0.22; // Individual point weight
             }
 
             const isFirstPage = pages.length === 0;
@@ -525,29 +478,7 @@ function App() {
             minute: '2-digit',
             hour12: true
         }));
-        try {
-            // Mark this version as a completed (non-draft) itinerary if desired, 
-            // or just insert as a history record.
-            const { error: dbError } = await supabase
-                .from('itineraries')
-                .insert([
-                    {
-                        title: calculateTourHeading(),
-                        client_name: 'Client',
-                        num_days: numDays,
-                        itinerary_data: itinerary,
-                        arrival_date: arrivalDate || null,
-                        departure_date: departureDate || null,
-                        is_draft: false
-                    }
-                ]);
-
-            if (dbError) {
-                console.error("Error saving itinerary to database:", dbError);
-            }
-        } catch (dbError) {
-            console.error("Supabase exception:", dbError);
-        }
+        // PDF generation logic below - no backend saving for itineraries per request
 
         // Higher delay to ensure all dynamic content and images are fully rendered
         setTimeout(async () => {
@@ -1768,10 +1699,11 @@ const PDFContent = ({ pages, arrivalDate, departureDate, tripStart, tripEnd, cus
                                                         {group.parts.filter(p => p.type === 'dest-para').map(para => para.text).join('\n\n')}
                                                     </p>
 
-                                                    {group.parts.filter(p => p.type === 'dest-highlights').map((hl, hIdx) => (
-                                                        <div key={hIdx} className="pdf-sub-places" style={{ marginTop: '10px' }}>
+                                                    {group.parts.some(p => p.type === 'dest-highlight-point') && (
+                                                        <div className="pdf-sub-places" style={{ marginTop: '10px' }}>
                                                             <ul style={{ listStyleType: 'disc', paddingLeft: '20px' }}>
-                                                                {hl.highlights.map((sub, sIdx) => {
+                                                                {group.parts.filter(p => p.type === 'dest-highlight-point').map((pointItem, sIdx) => {
+                                                                    const sub = pointItem.highlight;
                                                                     const rawSubName = typeof sub === 'string' ? sub : sub.name;
                                                                     const subName = rawSubName.charAt(0).toUpperCase() + rawSubName.slice(1).toLowerCase();
                                                                     const subDesc = typeof sub === 'string' ? '' : sub.description;
@@ -1790,7 +1722,7 @@ const PDFContent = ({ pages, arrivalDate, departureDate, tripStart, tripEnd, cus
                                                                 })}
                                                             </ul>
                                                         </div>
-                                                    ))}
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>
