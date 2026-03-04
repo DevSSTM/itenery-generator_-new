@@ -176,11 +176,22 @@ function App() {
                 setPlacesList(updateFn);
             }
 
-            // Sync with itinerary object to ensure the updated name/title/description shows up in PDF
+            // Sync with itinerary object to ensure the updated name/title/description/subPlaces show up in PDF
             setItinerary(prev => {
                 const next = { ...prev };
                 Object.keys(next).forEach(day => {
-                    next[day] = next[day].map(p => p.id === editingPlaceId ? { ...newPlace, id: editingPlaceId } : p);
+                    next[day] = next[day].map(p => {
+                        if (p.id === editingPlaceId) {
+                            // Find matching objects in new subPlaces for currently selected ones
+                            const updatedSelected = (p.selectedSubPlaces || []).map(currentSelected => {
+                                const currentName = typeof currentSelected === 'string' ? currentSelected : currentSelected.name;
+                                const match = (newPlace.subPlaces || []).find(sp => (typeof sp === 'string' ? sp : sp.name) === currentName);
+                                return match || currentSelected;
+                            });
+                            return { ...newPlace, id: editingPlaceId, selectedSubPlaces: updatedSelected };
+                        }
+                        return p;
+                    });
                 });
                 return next;
             });
@@ -311,8 +322,12 @@ function App() {
                 if (item.image2) weight += 0.5;
                 if (item.selectedSubPlaces?.length > 0) {
                     item.selectedSubPlaces.forEach(sub => {
-                        weight += 0.15; // Base per item
-                        if (sub.description) weight += 0.12; // Extra for description line
+                        weight += 0.15; // Base for name
+                        const descText = typeof sub === 'string' ? '' : (sub.description || '');
+                        if (descText) {
+                            // Approximately count lines: ~60 chars per line in the description block in PDF
+                            weight += 0.05 + (Math.ceil(descText.length / 60) * 0.1);
+                        }
                     });
                 }
             }
@@ -905,34 +920,62 @@ function App() {
                                                                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }}>
                                                                         {item.selectedSubPlaces.map((sub, sIdx) => {
                                                                             const displayName = typeof sub === 'string' ? sub : sub.name;
+                                                                            const displayDesc = typeof sub === 'string' ? '' : sub.description;
                                                                             return (
-                                                                                <span
+                                                                                <div
                                                                                     key={sIdx}
                                                                                     style={{
-                                                                                        background: 'rgba(25, 118, 210, 0.1)',
-                                                                                        color: 'var(--primary)',
-                                                                                        padding: '4px 12px',
-                                                                                        borderRadius: '20px',
-                                                                                        fontSize: '0.75rem',
+                                                                                        background: 'white',
+                                                                                        padding: '10px 15px',
+                                                                                        borderRadius: '10px',
+                                                                                        border: '1px solid #e2e8f0',
                                                                                         display: 'flex',
-                                                                                        alignItems: 'center',
+                                                                                        flexDirection: 'column',
                                                                                         gap: '5px',
-                                                                                        border: '1px solid rgba(25, 118, 210, 0.2)'
+                                                                                        width: '100%',
+                                                                                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
                                                                                     }}
                                                                                 >
-                                                                                    {displayName}
-                                                                                    <X
-                                                                                        size={12}
-                                                                                        style={{ cursor: 'pointer' }}
-                                                                                        onClick={() => {
-                                                                                            setItinerary(prev => {
-                                                                                                const nextDay = [...prev[activeDay]];
-                                                                                                nextDay[idx] = { ...nextDay[idx], selectedSubPlaces: item.selectedSubPlaces.filter((_, i) => i !== sIdx) };
-                                                                                                return { ...prev, [activeDay]: nextDay };
-                                                                                            });
-                                                                                        }}
-                                                                                    />
-                                                                                </span>
+                                                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                                                        <span style={{ fontWeight: 'bold', fontSize: '0.85rem', color: 'var(--primary)' }}>{displayName}</span>
+                                                                                        <div style={{ display: 'flex', gap: '8px' }}>
+                                                                                            <button
+                                                                                                onClick={() => {
+                                                                                                    const newDesc = prompt("Edit description for " + displayName + ":", displayDesc);
+                                                                                                    if (newDesc !== null) {
+                                                                                                        setItinerary(prev => {
+                                                                                                            const nextDay = [...prev[activeDay]];
+                                                                                                            const updatedSub = typeof sub === 'string' ? { name: sub, description: newDesc } : { ...sub, description: newDesc };
+                                                                                                            const updatedSubs = [...item.selectedSubPlaces];
+                                                                                                            updatedSubs[sIdx] = updatedSub;
+                                                                                                            nextDay[idx] = { ...nextDay[idx], selectedSubPlaces: updatedSubs };
+                                                                                                            return { ...prev, [activeDay]: nextDay };
+                                                                                                        });
+                                                                                                    }
+                                                                                                }}
+                                                                                                style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '2px' }}
+                                                                                            >
+                                                                                                <Edit2 size={14} />
+                                                                                            </button>
+                                                                                            <X
+                                                                                                size={16}
+                                                                                                style={{ cursor: 'pointer', color: '#dc2626' }}
+                                                                                                onClick={() => {
+                                                                                                    setItinerary(prev => {
+                                                                                                        const nextDay = [...prev[activeDay]];
+                                                                                                        nextDay[idx] = { ...nextDay[idx], selectedSubPlaces: item.selectedSubPlaces.filter((_, i) => i !== sIdx) };
+                                                                                                        return { ...prev, [activeDay]: nextDay };
+                                                                                                    });
+                                                                                                }}
+                                                                                            />
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    {displayDesc && (
+                                                                                        <div style={{ fontSize: '0.8rem', color: '#64748b', fontStyle: 'italic', borderTop: '1px solid #f1f5f9', paddingTop: '5px', marginTop: '2px' }}>
+                                                                                            {displayDesc}
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
                                                                             );
                                                                         })}
                                                                     </div>
@@ -1526,18 +1569,20 @@ const PDFContent = ({ pages, arrivalDate, departureDate, tripStart, tripEnd, cus
 
                                                 {item.selectedSubPlaces && item.selectedSubPlaces.length > 0 && (
                                                     <div className="pdf-sub-places" style={{ marginTop: '10px' }}>
-                                                        <ul style={{ listStyleType: 'disc', paddingLeft: '20px', fontSize: '0.9rem', color: '#4a5568' }}>
+                                                        <ul style={{ listStyleType: 'disc', paddingLeft: '20px' }}>
                                                             {item.selectedSubPlaces.map((sub, sIdx) => {
                                                                 const subName = typeof sub === 'string' ? sub : sub.name;
                                                                 const subDesc = typeof sub === 'string' ? '' : sub.description;
                                                                 return (
-                                                                    <li key={sIdx} style={{ marginBottom: '6px', lineHeight: '1.4' }}>
-                                                                        <span style={{ fontWeight: '600', color: '#1a202c' }}>{subName}</span>
-                                                                        {subDesc && (
-                                                                            <span style={{ fontSize: '0.9rem', color: '#4a5568', display: 'block', marginTop: '4px', lineHeight: '1.4' }}>
-                                                                                {subDesc}
-                                                                            </span>
-                                                                        )}
+                                                                    <li key={sIdx} style={{ marginBottom: '10px', lineHeight: '1.5' }}>
+                                                                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                                            <span style={{ fontWeight: '700', color: '#1a365d', fontSize: '1rem', textTransform: 'uppercase' }}>{subName}</span>
+                                                                            {subDesc && (
+                                                                                <div style={{ fontSize: '0.95rem', color: '#4a5568', marginTop: '4px', lineHeight: '1.4', wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                                                                                    {subDesc}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
                                                                     </li>
                                                                 );
                                                             })}
