@@ -92,6 +92,10 @@ function App() {
     const [newPlace, setNewPlace] = useState({ name: '', title: '', description: '', image: null, image2: null, subPlaces: [] });
     const [newSubPlace, setNewSubPlace] = useState({ name: '', description: '' });
     const [newDayPoint, setNewDayPoint] = useState('');
+    const [editingSubPlaceIdx, setEditingSubPlaceIdx] = useState(null);
+    const [editingSubValue, setEditingSubValue] = useState({ name: '', description: '' });
+    const [editingDayPointIdx, setEditingDayPointIdx] = useState(null);
+    const [editingDayPointValue, setEditingDayPointValue] = useState('');
     const [showPlaceForm, setShowPlaceForm] = useState(false);
     const [editingPlaceId, setEditingPlaceId] = useState(null);
     const [placesGallery, setPlacesGallery] = useState(galleryDataRaw);
@@ -720,58 +724,103 @@ function App() {
                                                 >
                                                     <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '12px', color: '#856404' }}>General Itinerary Note for Day {activeDay} (Point by Point)</label>
 
-                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '15px' }}>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
                                                         {(dayNoteText[activeDay] || '').split('\n').filter(p => p.trim()).map((point, pIdx) => (
-                                                            <div key={pIdx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'white', padding: '10px 15px', borderRadius: '8px', border: '1px solid #ffeeba' }}>
-                                                                <span style={{ fontSize: '0.9rem', color: '#1a202c' }}>• {point}</span>
-                                                                <button
-                                                                    onClick={() => {
-                                                                        const points = (dayNoteText[activeDay] || '').split('\n');
-                                                                        points.splice(pIdx, 1);
-                                                                        setDayNoteText(prev => ({ ...prev, [activeDay]: points.join('\n') }));
-                                                                    }}
-                                                                    style={{ background: 'none', border: 'none', color: '#e53e3e', cursor: 'pointer', padding: '5px' }}
-                                                                >
-                                                                    <Trash2 size={16} />
-                                                                </button>
+                                                            <div key={pIdx} style={{ background: 'white', padding: '12px 15px', borderRadius: '8px', border: '1px solid #ffeeba', boxShadow: '0 2px 4px rgba(133, 100, 4, 0.05)' }}>
+                                                                {editingDayPointIdx === pIdx ? (
+                                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
+                                                                        <textarea
+                                                                            value={editingDayPointValue}
+                                                                            onChange={(e) => setEditingDayPointValue(e.target.value)}
+                                                                            style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--primary)', fontSize: '0.95rem', minHeight: '100px', background: 'white' }}
+                                                                        />
+                                                                        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                                                                            <button
+                                                                                onClick={() => {
+                                                                                    const points = (dayNoteText[activeDay] || '').split('\n');
+                                                                                    points[pIdx] = editingDayPointValue.trim();
+                                                                                    setDayNoteText(prev => ({ ...prev, [activeDay]: points.join('\n') }));
+                                                                                    setEditingDayPointIdx(null);
+                                                                                }}
+                                                                                className="btn btn-primary"
+                                                                                style={{ padding: '8px 16px', fontSize: '0.85rem' }}
+                                                                            >Save Changes</button>
+                                                                            <button
+                                                                                onClick={() => setEditingDayPointIdx(null)}
+                                                                                className="btn btn-outline"
+                                                                                style={{ padding: '8px 16px', fontSize: '0.85rem' }}
+                                                                            >Cancel</button>
+                                                                        </div>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                                        <span style={{ fontSize: '0.9rem', color: '#1a202c', flex: 1 }}>• {point}</span>
+                                                                        <div style={{ display: 'flex', gap: '5px' }}>
+                                                                            <button
+                                                                                onClick={() => {
+                                                                                    setEditingDayPointIdx(pIdx);
+                                                                                    setEditingDayPointValue(point);
+                                                                                }}
+                                                                                style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#64748b', borderRadius: '6px', padding: '6px', cursor: 'pointer' }}
+                                                                            >
+                                                                                <Edit2 size={14} />
+                                                                            </button>
+                                                                            <button
+                                                                                onClick={() => {
+                                                                                    const points = (dayNoteText[activeDay] || '').split('\n');
+                                                                                    points.splice(pIdx, 1);
+                                                                                    setDayNoteText(prev => ({ ...prev, [activeDay]: points.join('\n') }));
+                                                                                }}
+                                                                                style={{ background: '#fff5f5', border: '1px solid #fed7d7', color: '#e53e3e', borderRadius: '6px', padding: '6px', cursor: 'pointer' }}
+                                                                            >
+                                                                                <Trash2 size={14} />
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         ))}
                                                     </div>
 
-                                                    <div style={{ display: 'flex', gap: '10px' }}>
-                                                        <textarea
-                                                            placeholder="Type a new highlight/note point... (Press Enter to add)"
-                                                            value={newDayPoint}
-                                                            onChange={(e) => setNewDayPoint(e.target.value)}
-                                                            onKeyDown={(e) => {
-                                                                if (e.key === 'Enter' && !e.shiftKey) {
-                                                                    e.preventDefault();
-                                                                    if (!newDayPoint.trim()) return;
-                                                                    setDayNoteText(prev => {
-                                                                        const current = prev[activeDay] || '';
-                                                                        const updated = current ? current + '\n' + newDayPoint.trim() : newDayPoint.trim();
-                                                                        return { ...prev, [activeDay]: updated };
-                                                                    });
-                                                                    setNewDayPoint('');
-                                                                }
-                                                            }}
-                                                            style={{ flex: 1, padding: '12px', borderRadius: '8px', border: '1px solid #ffeeba', fontSize: '0.9rem', minHeight: '60px', background: 'white' }}
-                                                        />
-                                                        <button
-                                                            onClick={() => {
-                                                                if (!newDayPoint.trim()) return;
-                                                                setDayNoteText(prev => {
-                                                                    const current = prev[activeDay] || '';
-                                                                    const updated = current ? current + '\n' + newDayPoint.trim() : newDayPoint.trim();
-                                                                    return { ...prev, [activeDay]: updated };
-                                                                });
-                                                                setNewDayPoint('');
-                                                            }}
-                                                            className="btn btn-primary"
-                                                            style={{ alignSelf: 'flex-end', padding: '12px 20px', fontSize: '0.85rem' }}
-                                                        >
-                                                            Add Point
-                                                        </button>
+                                                    <div style={{ borderTop: '2px dashed #ffeeba', paddingTop: '20px' }}>
+                                                        <div style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#475569', marginBottom: '10px' }}>ADD NEW HIGHLIGHT POINT</div>
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                                            <textarea
+                                                                placeholder="Type a new highlight or special note point here... (Press Enter to add)"
+                                                                value={newDayPoint}
+                                                                onChange={(e) => setNewDayPoint(e.target.value)}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                                                        e.preventDefault();
+                                                                        if (!newDayPoint.trim()) return;
+                                                                        setDayNoteText(prev => {
+                                                                            const current = prev[activeDay] || '';
+                                                                            const updated = current ? current + '\n' + newDayPoint.trim() : newDayPoint.trim();
+                                                                            return { ...prev, [activeDay]: updated };
+                                                                        });
+                                                                        setNewDayPoint('');
+                                                                    }
+                                                                }}
+                                                                style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '2px solid #ffeeba', fontSize: '1.05rem', minHeight: '180px', background: 'white', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.03)', lineHeight: '1.6', resize: 'vertical' }}
+                                                            />
+                                                            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                                                <button
+                                                                    onClick={() => {
+                                                                        if (!newDayPoint.trim()) return;
+                                                                        setDayNoteText(prev => {
+                                                                            const current = prev[activeDay] || '';
+                                                                            const updated = current ? current + '\n' + newDayPoint.trim() : newDayPoint.trim();
+                                                                            return { ...prev, [activeDay]: updated };
+                                                                        });
+                                                                        setNewDayPoint('');
+                                                                    }}
+                                                                    className="btn btn-primary"
+                                                                    style={{ padding: '10px 24px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '8px', borderRadius: '8px' }}
+                                                                >
+                                                                    <Plus size={18} /> Add Point to Journey
+                                                                </button>
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 </motion.div>
                                             )}
@@ -827,56 +876,65 @@ function App() {
                                                                 <select
                                                                     className="modern-input"
                                                                     onChange={(e) => {
-                                                                        const val = e.target.value;
-                                                                        if (!val) return;
+                                                                        const selectedIdx = e.target.value;
+                                                                        if (selectedIdx === "") return;
+
+                                                                        const subToAdd = place.subPlaces[selectedIdx];
                                                                         const currentSelection = item.selectedSubPlaces || [];
-                                                                        if (currentSelection.includes(val)) return;
+
+                                                                        const subNameToAdd = typeof subToAdd === 'string' ? subToAdd : subToAdd.name;
+                                                                        const exists = currentSelection.some(s => (typeof s === 'string' ? s : s.name) === subNameToAdd);
+
+                                                                        if (exists) return;
 
                                                                         setItinerary(prev => {
                                                                             const nextDay = [...prev[activeDay]];
-                                                                            nextDay[idx] = { ...nextDay[idx], selectedSubPlaces: [...currentSelection, val] };
+                                                                            nextDay[idx] = { ...nextDay[idx], selectedSubPlaces: [...currentSelection, subToAdd] };
                                                                             return { ...prev, [activeDay]: nextDay };
                                                                         });
                                                                     }}
                                                                     value=""
                                                                 >
                                                                     <option value="" disabled>--- Select a Place to Add ---</option>
-                                                                    {place.subPlaces.map(sub => (
-                                                                        <option key={sub} value={sub}>{sub}</option>
+                                                                    {place.subPlaces.map((sub, sIdx) => (
+                                                                        <option key={sIdx} value={sIdx}>{typeof sub === 'string' ? sub : sub.name}</option>
                                                                     ))}
                                                                 </select>
 
                                                                 {item.selectedSubPlaces && item.selectedSubPlaces.length > 0 && (
                                                                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }}>
-                                                                        {item.selectedSubPlaces.map(sub => (
-                                                                            <span
-                                                                                key={sub}
-                                                                                style={{
-                                                                                    background: 'rgba(25, 118, 210, 0.1)',
-                                                                                    color: 'var(--primary)',
-                                                                                    padding: '4px 12px',
-                                                                                    borderRadius: '20px',
-                                                                                    fontSize: '0.75rem',
-                                                                                    display: 'flex',
-                                                                                    alignItems: 'center',
-                                                                                    gap: '5px',
-                                                                                    border: '1px solid rgba(25, 118, 210, 0.2)'
-                                                                                }}
-                                                                            >
-                                                                                {sub}
-                                                                                <X
-                                                                                    size={12}
-                                                                                    style={{ cursor: 'pointer' }}
-                                                                                    onClick={() => {
-                                                                                        setItinerary(prev => {
-                                                                                            const nextDay = [...prev[activeDay]];
-                                                                                            nextDay[idx] = { ...nextDay[idx], selectedSubPlaces: item.selectedSubPlaces.filter(s => s !== sub) };
-                                                                                            return { ...prev, [activeDay]: nextDay };
-                                                                                        });
+                                                                        {item.selectedSubPlaces.map((sub, sIdx) => {
+                                                                            const displayName = typeof sub === 'string' ? sub : sub.name;
+                                                                            return (
+                                                                                <span
+                                                                                    key={sIdx}
+                                                                                    style={{
+                                                                                        background: 'rgba(25, 118, 210, 0.1)',
+                                                                                        color: 'var(--primary)',
+                                                                                        padding: '4px 12px',
+                                                                                        borderRadius: '20px',
+                                                                                        fontSize: '0.75rem',
+                                                                                        display: 'flex',
+                                                                                        alignItems: 'center',
+                                                                                        gap: '5px',
+                                                                                        border: '1px solid rgba(25, 118, 210, 0.2)'
                                                                                     }}
-                                                                                />
-                                                                            </span>
-                                                                        ))}
+                                                                                >
+                                                                                    {displayName}
+                                                                                    <X
+                                                                                        size={12}
+                                                                                        style={{ cursor: 'pointer' }}
+                                                                                        onClick={() => {
+                                                                                            setItinerary(prev => {
+                                                                                                const nextDay = [...prev[activeDay]];
+                                                                                                nextDay[idx] = { ...nextDay[idx], selectedSubPlaces: item.selectedSubPlaces.filter((_, i) => i !== sIdx) };
+                                                                                                return { ...prev, [activeDay]: nextDay };
+                                                                                            });
+                                                                                        }}
+                                                                                    />
+                                                                                </span>
+                                                                            );
+                                                                        })}
                                                                     </div>
                                                                 )}
                                                             </div>
@@ -889,8 +947,8 @@ function App() {
                                             <div className="destination-picker-dropdowns" style={{ marginTop: '40px', padding: '30px', background: 'white', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
                                                 <h2 style={{ fontSize: '1.4rem', color: 'var(--primary)', marginBottom: '25px' }}>Add City to Day {activeDay}</h2>
 
-                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '20px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                                                    <div className="form-group" style={{ marginBottom: 0 }}>
+                                                <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-end' }}>
+                                                    <div className="form-group" style={{ marginBottom: 0, flex: 1 }}>
                                                         <label>Select City</label>
                                                         <select
                                                             className="modern-input"
@@ -911,18 +969,6 @@ function App() {
                                                             ))}
                                                         </select>
                                                     </div>
-
-                                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '10px', color: '#94a3b8' }}>
-                                                        <span style={{ fontSize: '0.8rem' }}>Or go to home to Manage Destinations</span>
-                                                    </div>
-
-                                                    <button
-                                                        className="btn btn-outline"
-                                                        onClick={() => setCurrentStep(1)}
-                                                        style={{ whiteSpace: 'nowrap' }}
-                                                    >
-                                                        New Locations
-                                                    </button>
                                                 </div>
                                             </div>
                                         </div>
@@ -1130,21 +1176,86 @@ function App() {
 
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
                                         {(newPlace.subPlaces || []).map((sub, sIdx) => (
-                                            <div key={sIdx} style={{ background: '#f8fafc', padding: '12px 15px', borderRadius: '10px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '15px' }}>
-                                                <div style={{ flex: 1 }}>
-                                                    <div style={{ fontWeight: 'bold', fontSize: '0.9rem', color: 'var(--primary)', marginBottom: '4px' }}>{sub.name}</div>
-                                                    {sub.description && <div style={{ fontSize: '0.8rem', color: '#64748b', fontStyle: 'italic' }}>{sub.description}</div>}
-                                                </div>
-                                                <button
-                                                    onClick={() => {
-                                                        const updatedSubs = [...newPlace.subPlaces];
-                                                        updatedSubs.splice(sIdx, 1);
-                                                        setNewPlace({ ...newPlace, subPlaces: updatedSubs });
-                                                    }}
-                                                    style={{ background: '#fee2e2', color: '#ef4444', border: 'none', borderRadius: '50%', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
-                                                >
-                                                    <Trash2 size={14} />
-                                                </button>
+                                            <div key={sIdx} style={{ background: '#f8fafc', padding: '12px 15px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                                                {editingSubPlaceIdx === sIdx ? (
+                                                    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 2.3fr auto auto', gap: '10px', alignItems: 'center' }}>
+                                                        <input
+                                                            type="text"
+                                                            value={editingSubValue.name}
+                                                            onChange={(e) => setEditingSubValue({ ...editingSubValue, name: e.target.value })}
+                                                            style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--primary)', fontSize: '0.85rem' }}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    const updated = [...newPlace.subPlaces];
+                                                                    updated[sIdx] = { ...editingSubValue };
+                                                                    setNewPlace({ ...newPlace, subPlaces: updated });
+                                                                    setEditingSubPlaceIdx(null);
+                                                                }
+                                                            }}
+                                                        />
+                                                        <input
+                                                            type="text"
+                                                            value={editingSubValue.description}
+                                                            onChange={(e) => setEditingSubValue({ ...editingSubValue, description: e.target.value })}
+                                                            style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--primary)', fontSize: '0.85rem' }}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    const updated = [...newPlace.subPlaces];
+                                                                    updated[sIdx] = { ...editingSubValue };
+                                                                    setNewPlace({ ...newPlace, subPlaces: updated });
+                                                                    setEditingSubPlaceIdx(null);
+                                                                }
+                                                            }}
+                                                        />
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.preventDefault();
+                                                                const updated = [...newPlace.subPlaces];
+                                                                updated[sIdx] = { ...editingSubValue };
+                                                                setNewPlace({ ...newPlace, subPlaces: updated });
+                                                                setEditingSubPlaceIdx(null);
+                                                            }}
+                                                            style={{ background: 'var(--primary)', color: 'white', border: 'none', borderRadius: '6px', padding: '8px 12px', fontSize: '0.75rem', cursor: 'pointer' }}
+                                                        >Save</button>
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.preventDefault();
+                                                                setEditingSubPlaceIdx(null);
+                                                            }}
+                                                            style={{ border: '1px solid #ddd', background: 'white', color: '#666', borderRadius: '6px', padding: '8px 12px', fontSize: '0.75rem', cursor: 'pointer' }}
+                                                        >Cancel</button>
+                                                    </div>
+                                                ) : (
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '15px' }}>
+                                                        <div style={{ flex: 1 }}>
+                                                            <div style={{ fontWeight: 'bold', fontSize: '0.9rem', color: 'var(--primary)', marginBottom: '4px' }}>{sub.name}</div>
+                                                            {sub.description && <div style={{ fontSize: '0.8rem', color: '#64748b', fontStyle: 'italic' }}>{sub.description}</div>}
+                                                        </div>
+                                                        <div style={{ display: 'flex', gap: '5px' }}>
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.preventDefault();
+                                                                    setEditingSubPlaceIdx(sIdx);
+                                                                    setEditingSubValue({ ...sub });
+                                                                }}
+                                                                style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#64748b', borderRadius: '6px', padding: '6px', cursor: 'pointer' }}
+                                                            >
+                                                                <Edit2 size={14} />
+                                                            </button>
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.preventDefault();
+                                                                    const updatedSubs = [...newPlace.subPlaces];
+                                                                    updatedSubs.splice(sIdx, 1);
+                                                                    setNewPlace({ ...newPlace, subPlaces: updatedSubs });
+                                                                }}
+                                                                style={{ background: '#fee2e2', border: '1px solid #fecaca', color: '#ef4444', borderRadius: '6px', padding: '6px', cursor: 'pointer' }}
+                                                            >
+                                                                <Trash2 size={14} />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         ))}
                                         {(!newPlace.subPlaces || newPlace.subPlaces.length === 0) && (
@@ -1423,7 +1534,7 @@ const PDFContent = ({ pages, arrivalDate, departureDate, tripStart, tripEnd, cus
                                                                     <li key={sIdx} style={{ marginBottom: '6px', lineHeight: '1.4' }}>
                                                                         <span style={{ fontWeight: '600', color: '#1a202c' }}>{subName}</span>
                                                                         {subDesc && (
-                                                                            <span style={{ fontSize: '0.8rem', color: '#718096', fontStyle: 'italic', display: 'block', marginTop: '2px' }}>
+                                                                            <span style={{ fontSize: '0.9rem', color: '#4a5568', display: 'block', marginTop: '4px', lineHeight: '1.4' }}>
                                                                                 {subDesc}
                                                                             </span>
                                                                         )}
