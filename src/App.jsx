@@ -66,6 +66,8 @@ function App() {
     const [isGenerating, setIsGenerating] = useState(false);
     const [userPlaces, setUserPlaces] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
+    const [hasLoadedDraft, setHasLoadedDraft] = useState(false);
+    const [activeItineraryId, setActiveItineraryId] = useState(null);
     const [showDayNote, setShowDayNote] = useState({}); // { 1: true, 2: false }
     const [dayNoteText, setDayNoteText] = useState({}); // { 1: "Note for day 1" }
 
@@ -75,14 +77,15 @@ function App() {
             setIsLoading(false);
         }, 2500);
 
-        const fetchPlaces = async () => {
+        const fetchAllData = async () => {
             try {
-                const { data, error } = await supabase.from('destinations').select('*');
-                if (!error && data) {
+                // Fetch Destinations
+                const { data: destData, error: destError } = await supabase.from('destinations').select('*');
+                if (!destError && destData) {
                     const dbPlacesMap = {};
                     const newCustomPlaces = [];
 
-                    data.forEach(dbPlace => {
+                    destData.forEach(dbPlace => {
                         const formattedPlace = {
                             ...dbPlace,
                             subPlaces: dbPlace.sub_places || [],
@@ -120,15 +123,68 @@ function App() {
                         setUserPlaces(newCustomPlaces);
                     }
                 }
+
+                // Fetch Latest Draft Itinerary
+                const { data: itinData, error: itinError } = await supabase
+                    .from('itineraries')
+                    .select('*')
+                    .eq('is_draft', true)
+                    .order('updated_at', { ascending: false })
+                    .limit(1);
+
+                if (!itinError && itinData && itinData.length > 0) {
+                    const draft = itinData[0];
+                    setActiveItineraryId(draft.id);
+                    setNumDays(draft.num_days);
+                    setItinerary(draft.itinerary_data);
+                    if (draft.arrival_date) setArrivalDate(draft.arrival_date);
+                    if (draft.departure_date) setDepartureDate(draft.departure_date);
+                }
+
+                setHasLoadedDraft(true);
             } catch (err) {
-                console.error("Error fetching places", err);
+                console.error("Error fetching initial data", err);
+                setHasLoadedDraft(true); // Proceed even on error to allow work
             }
         };
 
-        fetchPlaces();
+        fetchAllData();
 
         return () => clearTimeout(timer);
     }, []);
+
+    // Auto-save itinerary draft
+    React.useEffect(() => {
+        if (!hasLoadedDraft) return;
+
+        const saveDraft = async () => {
+            try {
+                const payload = {
+                    title: calculateTourHeading() || "Unnamed Itinerary",
+                    num_days: numDays,
+                    itinerary_data: itinerary,
+                    arrival_date: arrivalDate || null,
+                    departure_date: departureDate || null,
+                    is_draft: true,
+                    updated_at: new Date().toISOString()
+                };
+
+                if (activeItineraryId) {
+                    await supabase.from('itineraries').update(payload).eq('id', activeItineraryId);
+                } else {
+                    const { data, error } = await supabase.from('itineraries').insert([payload]).select();
+                    if (!error && data && data.length > 0) {
+                        setActiveItineraryId(data[0].id);
+                    }
+                }
+            } catch (e) {
+                console.error("Auto-save failed", e);
+            }
+        };
+
+        const timeoutId = setTimeout(saveDraft, 2000);
+        return () => clearTimeout(timeoutId);
+    }, [itinerary, numDays, arrivalDate, departureDate, hasLoadedDraft]);
 
     const [placesList, setPlacesList] = useState(() => {
         return places.map(p => {
@@ -230,8 +286,8 @@ function App() {
                     name: newPlace.name,
                     title: newPlace.title,
                     description: newPlace.description,
-                    image_url: typeof newPlace.image === 'string' && newPlace.image.startsWith('http') ? newPlace.image : null, // Ignore base64 images to save DB space right now, just save text.
-                    image_url_2: typeof newPlace.image2 === 'string' && newPlace.image2.startsWith('http') ? newPlace.image2 : null,
+                    image_url: newPlace.image,
+                    image_url_2: newPlace.image2,
                     sub_places: newPlace.subPlaces
                 });
             } catch (e) {
@@ -276,8 +332,8 @@ function App() {
                     name: newPlace.name,
                     title: newPlace.title || '',
                     description: newPlace.description,
-                    image_url: null, // Avoid slamming DB with massive base64 strings
-                    image_url_2: null,
+                    image_url: newPlace.image,
+                    image_url_2: newPlace.image2,
                     sub_places: newPlace.subPlaces
                 });
             } catch (e) {
@@ -469,22 +525,25 @@ function App() {
             minute: '2-digit',
             hour12: true
         }));
-
         try {
-            // Save to Supabase
-            const { error } = await supabase
+            // Mark this version as a completed (non-draft) itinerary if desired, 
+            // or just insert as a history record.
+            const { error: dbError } = await supabase
                 .from('itineraries')
                 .insert([
                     {
                         title: calculateTourHeading(),
-                        client_name: 'Client', // Or prompt/add field later
+                        client_name: 'Client',
                         num_days: numDays,
-                        itinerary_data: itinerary
+                        itinerary_data: itinerary,
+                        arrival_date: arrivalDate || null,
+                        departure_date: departureDate || null,
+                        is_draft: false
                     }
                 ]);
 
-            if (error) {
-                console.error("Error saving itinerary to database:", error);
+            if (dbError) {
+                console.error("Error saving itinerary to database:", dbError);
             }
         } catch (dbError) {
             console.error("Supabase exception:", dbError);
