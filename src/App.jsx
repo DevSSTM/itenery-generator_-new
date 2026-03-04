@@ -939,24 +939,6 @@ function App() {
                                                                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                                                                         <span style={{ fontWeight: 'bold', fontSize: '0.85rem', color: 'var(--primary)' }}>{displayName}</span>
                                                                                         <div style={{ display: 'flex', gap: '8px' }}>
-                                                                                            <button
-                                                                                                onClick={() => {
-                                                                                                    const newDesc = prompt("Edit description for " + displayName + ":", displayDesc);
-                                                                                                    if (newDesc !== null) {
-                                                                                                        setItinerary(prev => {
-                                                                                                            const nextDay = [...prev[activeDay]];
-                                                                                                            const updatedSub = typeof sub === 'string' ? { name: sub, description: newDesc } : { ...sub, description: newDesc };
-                                                                                                            const updatedSubs = [...item.selectedSubPlaces];
-                                                                                                            updatedSubs[sIdx] = updatedSub;
-                                                                                                            nextDay[idx] = { ...nextDay[idx], selectedSubPlaces: updatedSubs };
-                                                                                                            return { ...prev, [activeDay]: nextDay };
-                                                                                                        });
-                                                                                                    }
-                                                                                                }}
-                                                                                                style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '2px' }}
-                                                                                            >
-                                                                                                <Edit2 size={14} />
-                                                                                            </button>
                                                                                             <X
                                                                                                 size={16}
                                                                                                 style={{ cursor: 'pointer', color: '#dc2626' }}
