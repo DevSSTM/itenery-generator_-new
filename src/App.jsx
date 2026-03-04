@@ -919,7 +919,8 @@ function App() {
                                                                 {item.selectedSubPlaces && item.selectedSubPlaces.length > 0 && (
                                                                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }}>
                                                                         {item.selectedSubPlaces.map((sub, sIdx) => {
-                                                                            const displayName = typeof sub === 'string' ? sub : sub.name;
+                                                                            const rawDisplayName = typeof sub === 'string' ? sub : sub.name;
+                                                                            const displayName = rawDisplayName.charAt(0).toUpperCase() + rawDisplayName.slice(1).toLowerCase();
                                                                             const displayDesc = typeof sub === 'string' ? '' : sub.description;
                                                                             return (
                                                                                 <div
@@ -1553,14 +1554,15 @@ const PDFContent = ({ pages, arrivalDate, departureDate, tripStart, tripEnd, cus
                                                     <div className="pdf-sub-places" style={{ marginTop: '10px' }}>
                                                         <ul style={{ listStyleType: 'disc', paddingLeft: '20px' }}>
                                                             {item.selectedSubPlaces.map((sub, sIdx) => {
-                                                                const subName = typeof sub === 'string' ? sub : sub.name;
+                                                                const rawSubName = typeof sub === 'string' ? sub : sub.name;
+                                                                const subName = rawSubName.charAt(0).toUpperCase() + rawSubName.slice(1).toLowerCase();
                                                                 const subDesc = typeof sub === 'string' ? '' : sub.description;
                                                                 return (
                                                                     <li key={sIdx} style={{ marginBottom: '10px', lineHeight: '1.5' }}>
                                                                         <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                                                            <span style={{ fontWeight: '700', color: '#1a365d', fontSize: '1rem', textTransform: 'uppercase' }}>{subName}</span>
+                                                                            <span style={{ fontWeight: '700', color: '#1a365d', fontSize: '0.9rem' }}>{subName}</span>
                                                                             {subDesc && (
-                                                                                <div style={{ fontSize: '0.95rem', color: '#4a5568', marginTop: '4px', lineHeight: '1.4', wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                                                                                <div style={{ fontSize: '0.85rem', color: '#4a5568', marginTop: '4px', lineHeight: '1.4', wordBreak: 'break-word', whiteSpace: 'normal' }}>
                                                                                     {subDesc}
                                                                                 </div>
                                                                             )}
