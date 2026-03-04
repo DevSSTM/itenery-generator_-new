@@ -74,6 +74,59 @@ function App() {
         const timer = setTimeout(() => {
             setIsLoading(false);
         }, 2500);
+
+        const fetchPlaces = async () => {
+            try {
+                const { data, error } = await supabase.from('destinations').select('*');
+                if (!error && data) {
+                    const dbPlacesMap = {};
+                    const newCustomPlaces = [];
+
+                    data.forEach(dbPlace => {
+                        const formattedPlace = {
+                            ...dbPlace,
+                            subPlaces: dbPlace.sub_places || [],
+                        };
+
+                        dbPlacesMap[dbPlace.id] = formattedPlace;
+
+                        if (String(dbPlace.id).startsWith('custom-')) {
+                            newCustomPlaces.push({
+                                ...formattedPlace,
+                                image: dbPlace.image_url,
+                                image2: dbPlace.image_url_2
+                            });
+                        }
+                    });
+
+                    // Update standard places list with db overrides
+                    setPlacesList(prev => prev.map(pl => {
+                        if (dbPlacesMap[pl.id]) {
+                            const dbP = dbPlacesMap[pl.id];
+                            return {
+                                ...pl,
+                                name: dbP.name || pl.name,
+                                title: dbP.title || pl.title,
+                                description: dbP.description || pl.description,
+                                subPlaces: dbP.subPlaces && dbP.subPlaces.length > 0 ? dbP.subPlaces : pl.subPlaces,
+                                image: dbP.image_url || pl.image,
+                                image2: dbP.image_url_2 || pl.image2,
+                            };
+                        }
+                        return pl;
+                    }));
+
+                    if (newCustomPlaces.length > 0) {
+                        setUserPlaces(newCustomPlaces);
+                    }
+                }
+            } catch (err) {
+                console.error("Error fetching places", err);
+            }
+        };
+
+        fetchPlaces();
+
         return () => clearTimeout(timer);
     }, []);
 
