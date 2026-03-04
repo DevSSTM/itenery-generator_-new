@@ -294,8 +294,8 @@ function App() {
         for (let d = 1; d <= numDays; d++) {
             const dayPlaces = itinerary[d] || [];
             dayPlaces.forEach(item => {
-                // Break each destination into atomic parts for better space utilization/splitting
-                // 1. Header and Images Part
+                // We split into Head (Header+Images) and Content (Description+Highlights)
+                // This allows a city's text to wrap to the next page while keeping images on the first page
                 flowItems.push({
                     type: 'dest-head',
                     ...item,
@@ -303,7 +303,6 @@ function App() {
                     destId: item.id
                 });
 
-                // 2. Paragraph Parts
                 const paragraphs = (item.description || '').split('\n').filter(p => p.trim());
                 paragraphs.forEach((p, pIdx) => {
                     flowItems.push({
@@ -311,21 +310,17 @@ function App() {
                         text: p,
                         day: d,
                         destId: item.id,
-                        name: item.name,
-                        title: item.title,
-                        isFirstPara: pIdx === 0
+                        name: item.name
                     });
                 });
 
-                // 3. Highlights Part
                 if (item.selectedSubPlaces && item.selectedSubPlaces.length > 0) {
                     flowItems.push({
                         type: 'dest-highlights',
                         highlights: item.selectedSubPlaces,
                         day: d,
                         destId: item.id,
-                        name: item.name,
-                        title: item.title
+                        name: item.name
                     });
                 }
             });
@@ -343,30 +338,19 @@ function App() {
             let weight = 0;
             if (item.type === 'dayNote') {
                 const linesRaw = (item.text || '').split('\n').filter(l => l.trim());
-                let estimatedLines = 0;
-                linesRaw.forEach(l => {
-                    estimatedLines += Math.max(1, Math.ceil(l.length / 75));
-                });
-                weight = 1.0 + (estimatedLines * 0.35);
+                weight = 0.5 + (linesRaw.length * 0.2);
             } else if (item.type === 'dest-head') {
-                weight = 1.6; // Header + Images base
-                if (item.image2) weight += 0.4;
+                weight = 1.3; // Header + Images (smaller base to allow sharing)
+                if (item.image2) weight += 0.3;
             } else if (item.type === 'dest-para') {
-                weight = Math.max(0.15, (item.text || '').length / 500);
+                weight = Math.max(0.1, (item.text || '').length / 800);
             } else if (item.type === 'dest-highlights') {
-                weight = 0.2; // Base
-                item.highlights.forEach(sub => {
-                    weight += 0.15;
-                    const descText = typeof sub === 'string' ? '' : (sub.description || '');
-                    if (descText) {
-                        weight += 0.05 + (Math.ceil(descText.length / 60) * 0.1);
-                    }
-                });
+                weight = 0.2 + (item.highlights.length * 0.12);
             }
 
             const isFirstPage = pages.length === 0;
-            // First page has header/welcome which takes weight, so we lower maxWeight for items
-            const maxWeight = isFirstPage ? 3.0 : 4.4;
+            // INCREASED Capacity to allow more cities per page
+            const maxWeight = isFirstPage ? 3.8 : 5.4;
 
             if (currentPageWeight + weight > maxWeight && currentPage.length > 0) {
                 pages.push([...currentPage]);
@@ -1548,7 +1532,6 @@ const PDFContent = ({ pages, arrivalDate, departureDate, tripStart, tripEnd, cus
                                         }
                                         grouped.push(item);
                                     } else {
-                                        // destination part
                                         if (currentGroup && currentGroup.destId === item.destId) {
                                             currentGroup.parts.push(item);
                                         } else {
@@ -1583,44 +1566,42 @@ const PDFContent = ({ pages, arrivalDate, departureDate, tripStart, tripEnd, cus
                                     const dayText = `DAY ${String(group.sample.day).padStart(2, '0')}`;
 
                                     return (
-                                        <div key={`${group.destId}-${gIdx}`} className="pdf-day-item">
-                                            <div className="pdf-day-header">
-                                                <div className="day-number" style={{ fontSize: '2.5rem', whiteSpace: 'nowrap' }}>
+                                        <div key={`${group.destId}-${gIdx}`} className="pdf-day-item" style={{ marginBottom: '20px' }}>
+                                            <div className="pdf-day-header" style={{ marginBottom: hasHead ? '12px' : '4px', borderBottom: hasHead ? '2px solid #f8f8f8' : 'none' }}>
+                                                <div className="day-number" style={{ fontSize: hasHead ? '2.2rem' : '1.2rem', whiteSpace: 'nowrap' }}>
                                                     {dayText}
                                                 </div>
                                                 <div className="day-title-wrapper">
-                                                    <h2 style={{ fontSize: '2.2rem' }}>
-                                                        {group.sample.name} {!hasHead && <span style={{ fontSize: '1.1rem', opacity: 0.6, fontWeight: 'normal', marginLeft: '10px' }}>(continued)</span>}
+                                                    <h2 style={{ fontSize: hasHead ? '1.8rem' : '1.3rem' }}>
+                                                        {group.sample.name} {!hasHead && <span style={{ fontSize: '0.8rem', opacity: 0.6, fontWeight: 'normal', marginLeft: '5px', textTransform: 'uppercase' }}>(continued)</span>}
                                                     </h2>
                                                     {hasHead && <div className="day-subtitle">{headItem.title}</div>}
                                                 </div>
                                             </div>
 
-                                            <div className="pdf-day-content">
-                                                <div className="pdf-day-image-wrapper">
-                                                    {hasHead && (
-                                                        <>
+                                            <div className="pdf-day-content" style={{ display: hasHead ? 'grid' : 'block' }}>
+                                                {hasHead && (
+                                                    <div className="pdf-day-image-wrapper">
+                                                        <img
+                                                            src={customImages[headItem.destId] || headItem.image}
+                                                            alt={headItem.name}
+                                                            className="pdf-day-image"
+                                                            style={{ height: headItem.image2 ? '135px' : '200px', marginBottom: headItem.image2 ? '10px' : '0' }}
+                                                        />
+                                                        {headItem.image2 && (
                                                             <img
-                                                                src={customImages[headItem.destId] || headItem.image}
-                                                                alt={headItem.name}
+                                                                src={customImages[`${headItem.destId}-2`] || headItem.image2}
+                                                                alt={`${headItem.name} 2`}
                                                                 className="pdf-day-image"
-                                                                style={{ height: headItem.image2 ? '135px' : '200px', marginBottom: headItem.image2 ? '10px' : '0' }}
+                                                                style={{ height: '135px' }}
                                                             />
-                                                            {headItem.image2 && (
-                                                                <img
-                                                                    src={customImages[`${headItem.destId}-2`] || headItem.image2}
-                                                                    alt={`${headItem.name} 2`}
-                                                                    className="pdf-day-image"
-                                                                    style={{ height: '135px' }}
-                                                                />
-                                                            )}
-                                                        </>
-                                                    )}
-                                                </div>
+                                                        )}
+                                                    </div>
+                                                )}
                                                 <div className="pdf-day-description" style={{ flex: 1 }}>
-                                                    {group.parts.filter(p => p.type === 'dest-para').map((para, pIdx) => (
-                                                        <p key={pIdx} style={{ marginBottom: '8px' }}>{para.text}</p>
-                                                    ))}
+                                                    <p style={{ whiteSpace: 'pre-line' }}>
+                                                        {group.parts.filter(p => p.type === 'dest-para').map(para => para.text).join('\n\n')}
+                                                    </p>
 
                                                     {group.parts.filter(p => p.type === 'dest-highlights').map((hl, hIdx) => (
                                                         <div key={hIdx} className="pdf-sub-places" style={{ marginTop: '10px' }}>
