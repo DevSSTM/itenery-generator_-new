@@ -1562,3 +1562,155 @@ select.modern-input option {
     font-weight: 500;
     padding: 10px;
 }
+
+/* Comprehensive Mobile Responsiveness Updates */
+@media (max-width: 768px) {
+
+    /* Setup view: stack inputs */
+    .setup-grid {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+
+    .setup-container {
+        padding: 20px;
+        margin: 20px auto;
+        border-radius: 12px;
+    }
+
+    .preview-heading-box {
+        padding: 15px;
+    }
+
+    .preview-heading-box h3 {
+        font-size: 1.1rem;
+    }
+
+    /* Main builder grid - split to single column */
+    .main-layout {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+
+    /* Day items in builder */
+    .active-day-itinerary {
+        gap: 15px;
+    }
+
+    .itinerary-item-editor {
+        padding: 15px;
+        border-radius: 12px;
+    }
+
+    /* Editor top bar with images */
+    .itinerary-item-editor>div:first-child {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 15px !important;
+    }
+
+    .itinerary-item-editor>div:first-child>div:last-child {
+        align-self: flex-start !important;
+        width: 100% !important;
+        justify-content: flex-start !important;
+        flex-wrap: wrap;
+    }
+
+    /* Sub places grid inside editor */
+    .sub-places-selector {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    /* Destination Add Section */
+    .destination-picker-dropdowns {
+        padding: 15px !important;
+    }
+
+    .destination-picker-dropdowns>div {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 15px !important;
+    }
+
+    .form-group {
+        width: 100% !important;
+    }
+
+    /* Sidebar updates */
+    .sidebar {
+        position: static;
+        width: 100%;
+        margin-top: 30px;
+    }
+
+    /* Top days bar */
+    .days-scroll {
+        padding: 10px 5px !important;
+    }
+
+    /* Selected sub-places tags inside card */
+    .itinerary-item-editor>div:nth-child(2)>div {
+        flex-direction: column !important;
+    }
+
+    /* General text adjustments */
+    body {
+        font-size: 14px;
+    }
+
+    .section-title {
+        font-size: 1.5rem !important;
+    }
+
+    .modern-input {
+        padding: 12px 14px;
+    }
+
+    h3 {
+        font-size: 1.1rem;
+    }
+}
+
+@media (max-width: 480px) {
+
+    /* Even smaller screens */
+    .app-loader img {
+        width: 100px;
+    }
+
+    .logo-container img {
+        height: 40px !important;
+    }
+
+    .header-content {
+        padding: 10px;
+    }
+
+    /* PDF Responsive adjustments for mobile preview readability */
+    .pdf-day-content {
+        grid-template-columns: 1fr;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .pdf-day-image-wrapper {
+        width: 100%;
+        display: flex;
+        flex-direction: row;
+        gap: 10px;
+        margin-bottom: 10px;
+    }
+
+    .pdf-day-image {
+        height: 120px !important;
+        flex: 1;
+        margin-bottom: 0 !important;
+    }
+
+    .pdf-day-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+}

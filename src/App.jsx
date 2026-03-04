@@ -161,7 +161,7 @@ function App() {
 
 
 
-    const handleAddPlace = () => {
+    const handleAddPlace = async () => {
         if (!newPlace.name || !newPlace.description || !newPlace.image) {
             alert("Please provide place name, description and image.");
             return;
@@ -169,6 +169,22 @@ function App() {
 
         if (editingPlaceId) {
             // Edit existing
+
+            // Sync to Supabase in the background
+            try {
+                await supabase.from('destinations').upsert({
+                    id: editingPlaceId,
+                    name: newPlace.name,
+                    title: newPlace.title,
+                    description: newPlace.description,
+                    image_url: typeof newPlace.image === 'string' && newPlace.image.startsWith('http') ? newPlace.image : null, // Ignore base64 images to save DB space right now, just save text.
+                    image_url_2: typeof newPlace.image2 === 'string' && newPlace.image2.startsWith('http') ? newPlace.image2 : null,
+                    sub_places: newPlace.subPlaces
+                });
+            } catch (e) {
+                console.error("Failed to update Supabase", e);
+            }
+
             const updateFn = (list) => list.map(p => p.id === editingPlaceId ? { ...newPlace, id: editingPlaceId } : p);
 
             if (editingPlaceId.toString().startsWith('custom-')) {
@@ -200,6 +216,21 @@ function App() {
             // Add new
             const id = `custom-${Date.now()}`;
             const p = { ...newPlace, id };
+
+            try {
+                await supabase.from('destinations').insert({
+                    id: id,
+                    name: newPlace.name,
+                    title: newPlace.title || '',
+                    description: newPlace.description,
+                    image_url: null, // Avoid slamming DB with massive base64 strings
+                    image_url_2: null,
+                    sub_places: newPlace.subPlaces
+                });
+            } catch (e) {
+                console.error("Failed to insert into Supabase", e);
+            }
+
             setUserPlaces(prev => [...prev, p]);
         }
 
