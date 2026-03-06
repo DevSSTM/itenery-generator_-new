@@ -203,6 +203,12 @@ function App() {
         }
     }, [arrivalDate, departureDate]);
 
+    const canStartBuilding =
+        Boolean(arrivalDate) &&
+        Boolean(departureDate) &&
+        Boolean(tripStart.trim()) &&
+        Boolean(tripEnd.trim());
+
     const togglePlace = (place) => {
         setItinerary(prev => {
             const currentDayPlaces = prev[activeDay] || [];
@@ -717,8 +723,11 @@ function App() {
                                         </button>
                                         <button
                                             className="btn btn-primary"
-                                            disabled={!arrivalDate || !departureDate}
-                                            onClick={() => setCurrentStep(3)}
+                                            disabled={!canStartBuilding}
+                                            onClick={() => {
+                                                if (!canStartBuilding) return;
+                                                setCurrentStep(3);
+                                            }}
                                             style={{ padding: '12px 30px' }}
                                         >
                                             Start Building Itinerary <Compass size={18} style={{ marginLeft: '8px' }} />
@@ -1104,7 +1113,7 @@ function App() {
                                                         >
                                                             <option value="" disabled>--- Choose a City ---</option>
                                                             {allPlaces.map(p => (
-                                                                <option key={p.id} value={p.id}>{p.name} {p.title ? `- ${p.title}` : ''}</option>
+                                                                <option key={p.id} value={p.id}>{p.name}</option>
                                                             ))}
                                                         </select>
                                                     </div>
