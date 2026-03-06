@@ -1139,6 +1139,17 @@ header {
     border: 2px solid #e2e8f0;
 }
 
+.destination-toolbar {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+}
+
+.destination-search-input {
+    flex: 1 1 560px;
+    min-width: 420px;
+}
+
 /* Premium Gallery Styles */
 .gallery-grid {
     display: grid;
@@ -1774,6 +1785,17 @@ select.modern-input option {
     .structured-subplaces-grid {
         gap: 10px;
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .destination-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+
+    .destination-search-input {
+        min-width: 0;
+        flex: 1 1 auto;
     }
 
     h3 {

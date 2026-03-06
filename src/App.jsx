@@ -741,17 +741,17 @@ function App() {
                                         <button className="btn btn-outline" onClick={() => setCurrentStep(1)}>Back to Menu</button>
                                     </div>
 
-                                    <div style={{ display: 'flex', gap: '15px', marginBottom: '30px' }}>
+                                    <div className="destination-toolbar" style={{ marginBottom: '30px' }}>
                                         <input
                                             type="text"
                                             placeholder="Search existing cities..."
                                             value={searchTerm}
                                             onChange={(e) => setSearchTerm(e.target.value)}
-                                            className="modern-input"
-                                            style={{ flex: 1 }}
+                                            className="modern-input destination-search-input"
                                         />
                                         <button
                                             className="btn btn-primary"
+                                            style={{ width: 'auto', whiteSpace: 'nowrap', padding: '12px 22px' }}
                                             onClick={() => {
                                                 setEditingPlaceId(null);
                                                 setNewPlace({ name: '', title: '', description: '', specialNote: '', image: null, image2: null, subPlaces: [] });
