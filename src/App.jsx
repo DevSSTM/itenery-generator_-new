@@ -1301,21 +1301,24 @@ function App() {
                                     <div className="form-group full-height">
                                         <label>Description (Full details)</label>
                                         <textarea
-                                            style={{ width: '100%', height: '100%', minHeight: '300px', padding: '15px', borderRadius: '8px', border: '1px solid #ddd', resize: 'vertical', fontFamily: 'inherit' }}
+                                            style={{ width: '100%', height: '320px', padding: '15px', borderRadius: '8px', border: '1px solid #ddd', resize: 'none', overflowY: 'auto', fontFamily: 'inherit' }}
                                             value={newPlace.description}
                                             onChange={(e) => setNewPlace({ ...newPlace, description: e.target.value })}
                                             placeholder="Enter the detailed description for the itinerary..."
                                         />
                                     </div>
                                 </div>
-                                <div className="form-group" style={{ padding: '0 20px 20px' }}>
+                                <div className="form-group modal-full-row" style={{ padding: '0 10px 20px' }}>
                                     <label style={{ marginBottom: '15px', color: 'var(--primary)', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
                                         Structured Special Places to Visit
                                     </label>
 
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+                                    <div className="structured-subplaces-grid" style={{ marginBottom: '20px' }}>
                                         {(newPlace.subPlaces || []).map((sub, sIdx) => (
-                                            <div key={sIdx} style={{ background: '#f8fafc', padding: '12px 15px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                                            <div
+                                                key={sIdx}
+                                                className={editingSubPlaceIdx === sIdx ? 'structured-subplace-card is-editing' : 'structured-subplace-card'}
+                                            >
                                                 {editingSubPlaceIdx === sIdx ? (
                                                     <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 2.3fr auto auto', gap: '10px', alignItems: 'center' }}>
                                                         <input
@@ -1365,19 +1368,19 @@ function App() {
                                                         >Cancel</button>
                                                     </div>
                                                 ) : (
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '15px' }}>
+                                                    <div className="structured-subplace-body">
                                                         <div style={{ flex: 1 }}>
-                                                            <div style={{ fontWeight: 'bold', fontSize: '0.9rem', color: 'var(--primary)', marginBottom: '4px' }}>{sub.name}</div>
-                                                            {sub.description && <div style={{ fontSize: '0.8rem', color: '#64748b', fontStyle: 'italic' }}>{sub.description}</div>}
+                                                            <div className="structured-subplace-name">{sub.name}</div>
+                                                            {sub.description && <div className="structured-subplace-description">{sub.description}</div>}
                                                         </div>
-                                                        <div style={{ display: 'flex', gap: '5px' }}>
+                                                        <div className="structured-subplace-actions">
                                                             <button
                                                                 onClick={(e) => {
                                                                     e.preventDefault();
                                                                     setEditingSubPlaceIdx(sIdx);
                                                                     setEditingSubValue({ ...sub });
                                                                 }}
-                                                                style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#64748b', borderRadius: '6px', padding: '6px', cursor: 'pointer' }}
+                                                                className="structured-subplace-btn edit"
                                                             >
                                                                 <Edit2 size={14} />
                                                             </button>
@@ -1388,7 +1391,7 @@ function App() {
                                                                     updatedSubs.splice(sIdx, 1);
                                                                     setNewPlace({ ...newPlace, subPlaces: updatedSubs });
                                                                 }}
-                                                                style={{ background: '#fee2e2', border: '1px solid #fecaca', color: '#ef4444', borderRadius: '6px', padding: '6px', cursor: 'pointer' }}
+                                                                className="structured-subplace-btn delete"
                                                             >
                                                                 <Trash2 size={14} />
                                                             </button>
@@ -1398,13 +1401,13 @@ function App() {
                                             </div>
                                         ))}
                                         {(!newPlace.subPlaces || newPlace.subPlaces.length === 0) && (
-                                            <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '0.85rem', background: '#f8fafc', borderRadius: '10px', border: '1px dashed #cbd5e1' }}>
+                                            <div className="structured-subplace-empty" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '0.85rem', background: '#f8fafc', borderRadius: '10px', border: '1px dashed #cbd5e1' }}>
                                                 No special places added yet. Add one below.
                                             </div>
                                         )}
                                     </div>
 
-                                    <div style={{ background: '#fff', padding: '15px', borderRadius: '12px', border: '2px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                    <div className="add-new-place-card" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                                         <div style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#475569' }}>Add New Place Detail</div>
                                         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 2fr auto', gap: '12px', alignItems: 'flex-end' }}>
                                             <div className="form-group" style={{ marginBottom: 0 }}>

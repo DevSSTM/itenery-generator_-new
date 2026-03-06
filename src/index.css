@@ -1010,6 +1010,10 @@ header {
     flex-direction: column;
 }
 
+.modal-full-row {
+    grid-column: 1 / -1;
+}
+
 .image-upload-group {
     background: #f9f9f9;
     padding: 15px;
@@ -1037,6 +1041,102 @@ header {
     justify-content: flex-end;
     border-top: 1px solid #eee;
     padding-top: 20px;
+}
+
+/* Structured sub-places cards in destination editor */
+.structured-subplaces-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    width: 100%;
+}
+
+.structured-subplace-card {
+    background: #fff;
+    padding: 15px;
+    border-radius: 12px;
+    border: 2px solid #e2e8f0;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+    min-height: 120px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.structured-subplace-card:hover {
+    border-color: #cbd5e1;
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+    transform: translateY(-1px);
+}
+
+.structured-subplace-card.is-editing {
+    grid-column: 1 / -1;
+}
+
+.structured-subplace-body {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.structured-subplace-name {
+    font-weight: 700;
+    font-size: 0.86rem;
+    color: var(--primary);
+    margin-bottom: 2px;
+    line-height: 1.25;
+}
+
+.structured-subplace-description {
+    font-size: 0.76rem;
+    color: #64748b;
+    font-style: italic;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.structured-subplace-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.structured-subplace-btn {
+    border-radius: 7px;
+    padding: 5px;
+    cursor: pointer;
+    line-height: 0;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.structured-subplace-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+}
+
+.structured-subplace-btn.edit {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    color: #64748b;
+}
+
+.structured-subplace-btn.delete {
+    background: #fee2e2;
+    border: 1px solid #fecaca;
+    color: #ef4444;
+}
+
+.structured-subplace-empty {
+    grid-column: 1 / -1;
+}
+
+.add-new-place-card {
+    background: #fff;
+    padding: 15px;
+    border-radius: 12px;
+    border: 2px solid #e2e8f0;
 }
 
 /* Premium Gallery Styles */
@@ -1671,6 +1771,11 @@ select.modern-input option {
         padding: 12px 14px;
     }
 
+    .structured-subplaces-grid {
+        gap: 10px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
     h3 {
         font-size: 1.1rem;
     }
@@ -1689,6 +1794,11 @@ select.modern-input option {
 
     .header-content {
         padding: 10px;
+    }
+
+    .structured-subplaces-grid {
+        gap: 10px;
+        grid-template-columns: 1fr;
     }
 
     /* PDF Responsive adjustments for mobile preview readability */
