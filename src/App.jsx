@@ -1564,7 +1564,7 @@ function App() {
                                         <div>
                                             <button
                                                 onClick={() => setCurrentStep(1)}
-                                                style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '5px', padding: 0 }}
+                                                style={{ background: 'white', border: '1.5px solid #dc2626', color: '#dc2626', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px', marginBottom: '10px', padding: '6px 12px', borderRadius: '8px', fontWeight: 700 }}
                                             >
                                                 Back to Menu
                                             </button>
