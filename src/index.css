@@ -1048,6 +1048,35 @@ header {
     gap: 30px;
 }
 
+.route-marker-pin {
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    background: #dc2626;
+    border: 3px solid #ffffff;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.route-marker-core {
+    width: 5px;
+    height: 5px;
+    border-radius: 999px;
+    background: #fff;
+}
+
+.route-map-pdf-page .pdf-page {
+    background: #ffffff;
+}
+
+@media (max-width: 980px) {
+    .route-map-planner-card .modal-content {
+        width: 96vw !important;
+    }
+}
+
 .form-left-col,
 .form-right-col {
     display: flex;
@@ -2042,4 +2071,20 @@ select.modern-input option {
         align-items: flex-start;
         gap: 5px;
     }
+}
+
+/* Custom Leaflet Map Overrides */
+.leaflet-container {
+    background: #d4dadc !important; /* Force ocean color globally for the map canvas */
+}
+
+/* Transparent Tooltips for City Names */
+.transparent-tooltip {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+.transparent-tooltip::before {
+    display: none !important; /* Hides the little triangle pointer */
 }

@@ -9,6 +9,14 @@ import { Analytics } from "@vercel/analytics/react";
 import galleryDataRaw from './gallery_data.json';
 import { supabase } from './supabase';
 import { CITY_PDF_CONTAINER_ID, CityPDFContent, downloadCityPdfFromContainer } from './cityPdf';
+import RouteMapPlanner, { RouteMapPdfPage, hasRenderableRouteMapPlan } from './components/RouteMapPlanner';
+
+const ROUTE_MAP_SNAPSHOT_KEY = 'route_map_saved_snapshot_v1';
+const LOGIN_ROLE_KEY = 'itinerary_login_role_v1';
+const LOCAL_LOGIN_CREDENTIALS = {
+    admin: 'admin',
+    user: 'user',
+};
 
 const CARD_STYLES = [
     { bg: 'linear-gradient(135deg, #fff5f5 0%, #ffe3e3 100%)', border: '#fca5a5', accent: '#e53e3e' }, // Red
@@ -77,6 +85,40 @@ function App() {
     const [searchTerm, setSearchTerm] = useState('');
     const [showDayNote, setShowDayNote] = useState({}); // { 1: true, 2: false }
     const [dayNoteText, setDayNoteText] = useState({}); // { 1: "Note for day 1" }
+    const [routeMapPlan, setRouteMapPlan] = useState({ enabled: false, attachToFinalPdf: false, stops: [], routeCoords: [] });
+    const routeMapPlanRef = useRef(routeMapPlan);
+
+    React.useEffect(() => {
+        routeMapPlanRef.current = routeMapPlan;
+    }, [routeMapPlan]);
+
+    const handleRouteMapPlanChange = React.useCallback((nextPlanOrUpdater) => {
+        setRouteMapPlan((prev) => {
+            const nextPlan = typeof nextPlanOrUpdater === 'function'
+                ? nextPlanOrUpdater(prev)
+                : (nextPlanOrUpdater || prev);
+            routeMapPlanRef.current = nextPlan;
+            return nextPlan;
+        });
+    }, []);
+
+    const routeMapPlanForPdf = React.useMemo(() => {
+        const latestPlan = routeMapPlanRef.current || routeMapPlan || {};
+        let persistedSnapshot = '';
+        try {
+            persistedSnapshot = localStorage.getItem(ROUTE_MAP_SNAPSHOT_KEY) || '';
+        } catch (_err) {
+            persistedSnapshot = '';
+        }
+        return {
+            ...(latestPlan || {}),
+            mapSnapshot: latestPlan?.mapSnapshot || persistedSnapshot || '',
+        };
+    }, [routeMapPlan]);
+
+    const shouldIncludeRouteMapPage = routeMapPlanForPdf?.attachToFinalPdf === true
+        && hasRenderableRouteMapPlan(routeMapPlanForPdf)
+        && Boolean(routeMapPlanForPdf?.mapSnapshot);
 
     React.useEffect(() => {
         // Simulate initial loading for a premium feel
@@ -177,7 +219,18 @@ function App() {
     const [showPlaceForm, setShowPlaceForm] = useState(false);
     const [editingPlaceId, setEditingPlaceId] = useState(null);
     const [placesGallery, setPlacesGallery] = useState(galleryDataRaw);
-    const [isAdmin, setIsAdmin] = useState(false);
+    const [supabaseIsAdmin, setSupabaseIsAdmin] = useState(false);
+    const [sessionRole, setSessionRole] = useState(() => {
+        try {
+            return localStorage.getItem(LOGIN_ROLE_KEY) || '';
+        } catch (_err) {
+            return '';
+        }
+    });
+    const [loginUsername, setLoginUsername] = useState('');
+    const [loginPassword, setLoginPassword] = useState('');
+    const [loginError, setLoginError] = useState('');
+    const isAdmin = sessionRole === 'admin' || supabaseIsAdmin;
     const pdfRef = useRef();
 
     React.useEffect(() => {
@@ -195,13 +248,13 @@ function App() {
 
         let authSub;
         supabase.auth.getSession().then(({ data }) => {
-            setIsAdmin(resolveAdmin(data?.session?.user || null));
+            setSupabaseIsAdmin(resolveAdmin(data?.session?.user || null));
         }).catch(() => {
-            setIsAdmin(false);
+            setSupabaseIsAdmin(false);
         });
 
         const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-            setIsAdmin(resolveAdmin(session?.user || null));
+            setSupabaseIsAdmin(resolveAdmin(session?.user || null));
         });
         authSub = data?.subscription;
 
@@ -209,6 +262,42 @@ function App() {
             if (authSub) authSub.unsubscribe();
         };
     }, []);
+
+    React.useEffect(() => {
+        try {
+            if (sessionRole) {
+                localStorage.setItem(LOGIN_ROLE_KEY, sessionRole);
+            } else {
+                localStorage.removeItem(LOGIN_ROLE_KEY);
+            }
+        } catch (_err) {
+            // Ignore localStorage errors.
+        }
+    }, [sessionRole]);
+
+    const handleLocalLogin = (e) => {
+        e.preventDefault();
+        const username = loginUsername.trim().toLowerCase();
+        const password = loginPassword;
+        const expectedPassword = LOCAL_LOGIN_CREDENTIALS[username];
+
+        if (!expectedPassword || password !== expectedPassword) {
+            setLoginError('Invalid username or password.');
+            return;
+        }
+
+        setSessionRole(username);
+        setLoginUsername('');
+        setLoginPassword('');
+        setLoginError('');
+    };
+
+    const handleLogout = () => {
+        setSessionRole('');
+        setLoginUsername('');
+        setLoginPassword('');
+        setLoginError('');
+    };
 
     const calculateTourHeading = () => {
         if (!arrivalDate || !departureDate) return "";
@@ -650,10 +739,11 @@ function App() {
     };
 
     const pagesData = paginatePlaces();
-
     const [isPdfReady, setIsPdfReady] = useState(false);
 
-    const generatePDF = async () => {
+    const generatePDF = async (forcedRouteMapSnapshot = '', forceAttachRoutePlan = false) => {
+        const safeForcedSnapshot = typeof forcedRouteMapSnapshot === 'string' ? forcedRouteMapSnapshot : '';
+        const safeForceAttach = forceAttachRoutePlan === true;
         setIsGenerating(true);
         setGenerationTime(new Date().toLocaleString('en-GB', {
             day: '2-digit',
@@ -668,6 +758,7 @@ function App() {
         // Higher delay to ensure all dynamic content and images are fully rendered
         setTimeout(async () => {
             try {
+                const latestRouteMapPlan = routeMapPlanRef.current || routeMapPlan;
                 const container = document.getElementById('hidden-pdf-content');
                 if (!container) {
                     console.error("PDF container not found");
@@ -699,6 +790,55 @@ function App() {
 
                     const imgData = canvas.toDataURL('image/jpeg', 0.8);
                     pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+                }
+
+                const canAttachRoutePlan = safeForceAttach
+                    || latestRouteMapPlan?.attachToFinalPdf === true
+                    || routeMapPlan?.attachToFinalPdf === true;
+                if (canAttachRoutePlan) {
+                    const hiddenHasRouteMapPage = container.querySelectorAll('.route-map-pdf-page').length > 0;
+                    if (hiddenHasRouteMapPage) {
+                        const dateStr = new Date().toISOString().slice(0, 10);
+                        pdf.save(`Invel-Sri-Lanka-Itinerary-${dateStr}.pdf`);
+                        return;
+                    }
+
+                    let persistedSnapshot = '';
+                    try {
+                        persistedSnapshot = localStorage.getItem(ROUTE_MAP_SNAPSHOT_KEY) || '';
+                    } catch (_err) {
+                        persistedSnapshot = '';
+                    }
+                    const routeMapSnapshot = safeForcedSnapshot || persistedSnapshot || latestRouteMapPlan?.mapSnapshot || '';
+
+                    if (routeMapSnapshot) {
+                        if (routeMapSnapshot !== latestRouteMapPlan?.mapSnapshot) {
+                            setRouteMapPlan((prev) => ({
+                                ...(prev || {}),
+                                mapSnapshot: routeMapSnapshot,
+                            }));
+                        }
+
+                        pdf.addPage();
+                        const pdfHeight = pdf.internal.pageSize.getHeight();
+                        const marginX = 8;
+                        const marginY = 8;
+                        const mapImgType = routeMapSnapshot.startsWith('data:image/png') ? 'PNG' : 'JPEG';
+                        const imageSize = await new Promise((resolve, reject) => {
+                            const img = new Image();
+                            img.onload = () => resolve({ width: img.naturalWidth || img.width, height: img.naturalHeight || img.height });
+                            img.onerror = () => reject(new Error('Route map image load failed'));
+                            img.src = routeMapSnapshot;
+                        });
+                        const maxWidth = pdfWidth - marginX * 2;
+                        const maxHeight = pdfHeight - marginY * 2;
+                        const ratio = Math.min(maxWidth / imageSize.width, maxHeight / imageSize.height);
+                        const drawWidth = imageSize.width * ratio;
+                        const drawHeight = imageSize.height * ratio;
+                        const drawX = (pdfWidth - drawWidth) / 2;
+                        const drawY = (pdfHeight - drawHeight) / 2;
+                        pdf.addImage(routeMapSnapshot, mapImgType, drawX, drawY, drawWidth, drawHeight);
+                    }
                 }
 
                 const dateStr = new Date().toISOString().slice(0, 10);
@@ -794,6 +934,54 @@ function App() {
     };
 
     const totalSelected = Object.values(itinerary).reduce((acc, curr) => acc + curr.length, 0);
+
+    if (!isLoading && !sessionRole) {
+        return (
+            <div className="app">
+                <main className="container" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', paddingTop: '40px', paddingBottom: '40px' }}>
+                    <div style={{ width: '100%', maxWidth: '460px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '16px', boxShadow: '0 10px 25px rgba(2,6,23,0.08)', padding: '28px' }}>
+                        <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+                            <img src="/logo.png" alt="Invel Holidays Logo" style={{ width: '190px', maxWidth: '100%', marginBottom: '12px' }} />
+                            <h1 style={{ margin: 0, color: 'var(--primary)', fontSize: '1.45rem' }}>Login</h1>
+                            <p style={{ margin: '8px 0 0', color: '#64748b', fontSize: '0.9rem' }}>Use `admin/admin` or `user/user`.</p>
+                        </div>
+
+                        <form onSubmit={handleLocalLogin}>
+                            <div className="form-group">
+                                <label>Username</label>
+                                <input
+                                    type="text"
+                                    className="modern-input"
+                                    value={loginUsername}
+                                    onChange={(e) => setLoginUsername(e.target.value)}
+                                    autoComplete="username"
+                                    placeholder="admin or user"
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label>Password</label>
+                                <input
+                                    type="password"
+                                    className="modern-input"
+                                    value={loginPassword}
+                                    onChange={(e) => setLoginPassword(e.target.value)}
+                                    autoComplete="current-password"
+                                    placeholder="Enter password"
+                                />
+                            </div>
+                            {loginError && (
+                                <div style={{ color: '#b91c1c', fontSize: '0.85rem', marginBottom: '10px' }}>{loginError}</div>
+                            )}
+                            <button className="btn btn-primary" type="submit" style={{ width: '100%', marginTop: '6px' }}>
+                                Login
+                            </button>
+                        </form>
+                    </div>
+                </main>
+                <Analytics />
+            </div>
+        );
+    }
 
     return (
         <div className="app">
@@ -931,6 +1119,17 @@ function App() {
                     </div>
                     <div className="header-contact">
                         <span style={{ fontSize: '0.9rem', color: 'var(--text-light)' }}>www.invelsrilanka.com</span>
+                        <span style={{ marginLeft: '12px', fontSize: '0.82rem', color: '#475569' }}>
+                            {sessionRole === 'admin' ? 'Role: Admin' : 'Role: User'}
+                        </span>
+                        <button
+                            className="btn btn-outline btn-sm"
+                            type="button"
+                            style={{ width: 'auto', marginTop: 0, marginLeft: '10px', padding: '6px 10px' }}
+                            onClick={handleLogout}
+                        >
+                            Logout
+                        </button>
                     </div>
                 </div>
             </header>
@@ -1425,9 +1624,14 @@ function App() {
                                                             </div>
                                                         )}
 
-                                                    </motion.div>
-                                                );
-                                            })}
+                                            </motion.div>
+                                        );
+                                    })}
+
+                                            <RouteMapPlanner
+                                                plan={routeMapPlan}
+                                                onPlanChange={handleRouteMapPlanChange}
+                                            />
 
                                             <div className="destination-picker-dropdowns" style={{ marginTop: '40px', padding: '30px', background: 'white', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
                                                 <h2 style={{ fontSize: '1.4rem', color: 'var(--primary)', marginBottom: '25px' }}>Add City to Day {activeDay}</h2>
@@ -1499,7 +1703,7 @@ function App() {
                                 <button
                                     className="btn btn-outline"
                                     disabled={totalSelected === 0 || isGenerating}
-                                    onClick={generatePDF}
+                                    onClick={() => generatePDF()}
                                     style={{ width: '100%' }}
                                 >
                                     {isGenerating ? (
@@ -1542,6 +1746,8 @@ function App() {
                                 showDayNote={showDayNote}
                                 dayNoteText={dayNoteText}
                                 generationTime={generationTime}
+                                includeRouteMapPage={shouldIncludeRouteMapPage}
+                                routeMapPlan={routeMapPlanForPdf}
                             />
                         </div>
                     </div>
@@ -1585,6 +1791,8 @@ function App() {
                                         showDayNote={showDayNote}
                                         dayNoteText={dayNoteText}
                                         generationTime={generationTime || new Date().toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
+                                        includeRouteMapPage={shouldIncludeRouteMapPage}
+                                        routeMapPlan={routeMapPlanForPdf}
                                     />
                                 </div>
                             </div>
@@ -1593,7 +1801,7 @@ function App() {
                                 <button
                                     className="btn btn-primary"
                                     style={{ width: '250px' }}
-                                    onClick={generatePDF}
+                                    onClick={() => generatePDF()}
                                     disabled={isGenerating}
                                 >
                                     {isGenerating ? <div className="spinner"></div> : <><Download size={20} /> Download PDF</>}
@@ -2056,7 +2264,9 @@ const PDFContent = ({
     isPreview,
     generationTime,
     showDayNote = {},
-    dayNoteText = {}
+    dayNoteText = {},
+    includeRouteMapPage = false,
+    routeMapPlan = null,
 }) => {
     const calculateTourHeading = () => {
         let days = 0;
@@ -2327,6 +2537,11 @@ const PDFContent = ({
                     )}
                 </div>
             ))}
+            {includeRouteMapPage && routeMapPlan && (
+                <div key="route-map-pdf-page">
+                    <RouteMapPdfPage plan={routeMapPlan} />
+                </div>
+            )}
         </div>
     );
 };
