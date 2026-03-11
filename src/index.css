@@ -631,6 +631,48 @@ header {
     border-radius: 4px;
 }
 
+/* Fixed three-zone layout for every itinerary page */
+.pdf-fixed-header {
+    flex: 0 0 200px;
+    min-height: 200px;
+    max-height: 200px;
+    overflow: hidden;
+}
+
+.pdf-fixed-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    padding-bottom: 18px;
+}
+
+.pdf-fixed-footer {
+    flex: 0 0 64px;
+    min-height: 64px;
+    max-height: 64px;
+    margin-top: 0 !important;
+}
+
+/* Hard safety guards: keep all PDF content inside printable borders */
+.pdf-page *,
+.pdf-page *::before,
+.pdf-page *::after {
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.pdf-page img {
+    max-width: 100%;
+}
+
+.pdf-page p,
+.pdf-page li,
+.pdf-page span,
+.pdf-page div {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
 .pdf-page-number {
     position: absolute;
     bottom: 10px;
@@ -809,6 +851,12 @@ header {
     margin: 0;
 }
 
+.pdf-itinerary-list {
+    min-height: 0;
+    overflow: hidden;
+    padding-bottom: 14px;
+}
+
 .pdf-day-note {
     margin-top: 10px;
     padding: 10px;
@@ -831,36 +879,38 @@ header {
 .pdf-footer-premium {
     margin-top: auto;
     /* Push to bottom of flex container */
-    padding-top: 15px;
+    padding-top: 6px;
     border-top: 2px solid var(--primary);
     background: white;
     /* Solid background to prevent overlap issues */
-    padding-bottom: 20px;
+    padding-bottom: 6px;
     z-index: 5;
     position: relative;
+    min-height: 64px;
+    flex-shrink: 0;
 }
 
 .footer-top {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 10px;
+    margin-bottom: 4px;
 }
 
 .footer-brand h3 {
-    font-size: 1.1rem;
+    font-size: 0.82rem;
     color: var(--primary);
-    margin-bottom: 5px;
+    margin-bottom: 1px;
 }
 
 .footer-brand p {
-    font-size: 0.8rem;
+    font-size: 0.64rem;
     color: var(--text-light);
 }
 
 .footer-contact-grid {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 2px;
     align-items: flex-end;
 }
 
@@ -868,7 +918,7 @@ header {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 0.8rem;
+    font-size: 0.62rem;
     color: var(--text-light);
 }
 
@@ -1137,6 +1187,145 @@ header {
     padding: 15px;
     border-radius: 12px;
     border: 2px solid #e2e8f0;
+}
+
+.desc-manager {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.desc-card {
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    background: linear-gradient(180deg, #ffffff 0%, #fafafa 100%);
+    box-shadow: 0 6px 14px rgba(15, 23, 42, 0.04);
+    padding: 14px;
+}
+
+.desc-card.alt {
+    border-color: #dbeafe;
+    background: linear-gradient(180deg, #f8fbff 0%, #f3f9ff 100%);
+}
+
+.desc-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    gap: 10px;
+}
+
+.desc-card-title {
+    margin: 0;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #334155;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+}
+
+.desc-lock-btn {
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #475569;
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.desc-lock-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 3px 8px rgba(15, 23, 42, 0.08);
+}
+
+.desc-lock-btn.locked {
+    border-color: #fcd34d;
+    background: #fffbeb;
+    color: #92400e;
+}
+
+.desc-tag {
+    border-radius: 999px;
+    background: #dbeafe;
+    color: #1d4ed8;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 5px 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.35px;
+}
+
+.desc-textarea {
+    width: 100%;
+    min-height: 150px;
+    max-height: 240px;
+    padding: 14px 15px;
+    border-radius: 10px;
+    border: 1px solid #d1d5db;
+    background: #ffffff;
+    resize: vertical;
+    overflow-y: auto;
+    font-family: inherit;
+    font-size: 0.92rem;
+    line-height: 1.55;
+    transition: all 0.25s ease;
+}
+
+.desc-textarea.alt {
+    min-height: 120px;
+}
+
+.desc-textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 4px rgba(196, 30, 58, 0.08);
+}
+
+.desc-textarea.is-locked {
+    background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+    color: #64748b;
+}
+
+.desc-source-switch {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 6px;
+}
+
+.desc-source-btn {
+    border: none;
+    background: transparent;
+    color: #475569;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.desc-source-btn.active {
+    background: linear-gradient(135deg, var(--primary) 0%, #b91c1c 100%);
+    color: #ffffff;
+    box-shadow: 0 5px 12px rgba(185, 28, 28, 0.25);
+}
+
+.desc-footnote {
+    font-size: 0.75rem;
+    color: #64748b;
+    background: #f8fafc;
+    border: 1px dashed #cbd5e1;
+    border-radius: 10px;
+    padding: 8px 10px;
+    line-height: 1.45;
 }
 
 .destination-toolbar {
@@ -1796,6 +1985,10 @@ select.modern-input option {
     .destination-search-input {
         min-width: 0;
         flex: 1 1 auto;
+    }
+
+    .desc-source-switch {
+        grid-template-columns: 1fr;
     }
 
     h3 {

@@ -8,6 +8,7 @@ import { Analytics } from "@vercel/analytics/react";
 
 import galleryDataRaw from './gallery_data.json';
 import { supabase } from './supabase';
+import { CITY_PDF_CONTAINER_ID, CityPDFContent, downloadCityPdfFromContainer } from './cityPdf';
 
 const CARD_STYLES = [
     { bg: 'linear-gradient(135deg, #fff5f5 0%, #ffe3e3 100%)', border: '#fca5a5', accent: '#e53e3e' }, // Red
@@ -57,13 +58,21 @@ function App() {
     const [customImages, setCustomImages] = useState({});
     const [arrivalDate, setArrivalDate] = useState('');
     const [departureDate, setDepartureDate] = useState('');
+    const [useTravelDates, setUseTravelDates] = useState(true);
+    const [manualDaysCount, setManualDaysCount] = useState(1);
+    const [manualNightsCount, setManualNightsCount] = useState(0);
     const [tripStart, setTripStart] = useState('');
     const [tripEnd, setTripEnd] = useState('');
+    const [flightDetails, setFlightDetails] = useState('');
     const [currentStep, setCurrentStep] = useState(1); // 1: Setup, 2: Builder
     const [generationTime, setGenerationTime] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
     const [showPreview, setShowPreview] = useState(false);
+    const [showCityPreview, setShowCityPreview] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
+    const [isGeneratingCityPdf, setIsGeneratingCityPdf] = useState(false);
+    const [cityPdfPlace, setCityPdfPlace] = useState(null);
+    const [cityPdfSelectedSubIndexes, setCityPdfSelectedSubIndexes] = useState([]);
     const [userPlaces, setUserPlaces] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [showDayNote, setShowDayNote] = useState({}); // { 1: true, 2: false }
@@ -148,7 +157,17 @@ function App() {
             return p;
         });
     });
-    const [newPlace, setNewPlace] = useState({ name: '', title: '', description: '', image: null, image2: null, subPlaces: [] });
+    const [newPlace, setNewPlace] = useState({
+        name: '',
+        title: '',
+        description: '',
+        alternativeDescription: '',
+        activeDescriptionSource: 'default',
+        image: null,
+        image2: null,
+        subPlaces: []
+    });
+    const [isDefaultDescriptionLocked, setIsDefaultDescriptionLocked] = useState(true);
     const [newSubPlace, setNewSubPlace] = useState({ name: '', description: '' });
     const [newDayPoint, setNewDayPoint] = useState('');
     const [editingSubPlaceIdx, setEditingSubPlaceIdx] = useState(null);
@@ -158,7 +177,38 @@ function App() {
     const [showPlaceForm, setShowPlaceForm] = useState(false);
     const [editingPlaceId, setEditingPlaceId] = useState(null);
     const [placesGallery, setPlacesGallery] = useState(galleryDataRaw);
+    const [isAdmin, setIsAdmin] = useState(false);
     const pdfRef = useRef();
+
+    React.useEffect(() => {
+        const adminEmails = (import.meta.env.VITE_ADMIN_EMAILS || '')
+            .split(',')
+            .map(v => v.trim().toLowerCase())
+            .filter(Boolean);
+
+        const resolveAdmin = (user) => {
+            if (!user) return false;
+            const role = (user.app_metadata?.role || user.user_metadata?.role || '').toString().toLowerCase();
+            const email = (user.email || '').toLowerCase();
+            return role === 'admin' || (email && adminEmails.includes(email));
+        };
+
+        let authSub;
+        supabase.auth.getSession().then(({ data }) => {
+            setIsAdmin(resolveAdmin(data?.session?.user || null));
+        }).catch(() => {
+            setIsAdmin(false);
+        });
+
+        const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+            setIsAdmin(resolveAdmin(session?.user || null));
+        });
+        authSub = data?.subscription;
+
+        return () => {
+            if (authSub) authSub.unsubscribe();
+        };
+    }, []);
 
     const calculateTourHeading = () => {
         if (!arrivalDate || !departureDate) return "";
@@ -192,7 +242,7 @@ function App() {
     };
 
     React.useEffect(() => {
-        if (arrivalDate && departureDate) {
+        if (useTravelDates && arrivalDate && departureDate) {
             const start = new Date(arrivalDate);
             const end = new Date(departureDate);
             const diffTime = Math.abs(end - start);
@@ -201,11 +251,24 @@ function App() {
                 handleNumDaysChange(diffDays);
             }
         }
-    }, [arrivalDate, departureDate]);
+    }, [useTravelDates, arrivalDate, departureDate]);
+
+    React.useEffect(() => {
+        if (!useTravelDates) {
+            const parsedDays = Math.max(1, Math.min(30, parseInt(manualDaysCount, 10) || 1));
+            if (parsedDays !== numDays) {
+                handleNumDaysChange(parsedDays);
+            }
+        }
+    }, [useTravelDates, manualDaysCount]);
+
+    const manualDaysValid = Number.isFinite(Number(manualDaysCount)) && Number(manualDaysCount) >= 1;
+    const manualNightsValid = Number.isFinite(Number(manualNightsCount)) && Number(manualNightsCount) >= 0;
 
     const canStartBuilding =
-        Boolean(arrivalDate) &&
-        Boolean(departureDate) &&
+        (useTravelDates
+            ? (Boolean(arrivalDate) && Boolean(departureDate))
+            : (manualDaysValid && manualNightsValid)) &&
         Boolean(tripStart.trim()) &&
         Boolean(tripEnd.trim());
 
@@ -298,7 +361,17 @@ function App() {
             setUserPlaces(prev => [...prev, p]);
         }
 
-        setNewPlace({ name: '', title: '', description: '', image: null, image2: null, subPlaces: [] });
+        setNewPlace({
+            name: '',
+            title: '',
+            description: '',
+            alternativeDescription: '',
+            activeDescriptionSource: 'default',
+            image: null,
+            image2: null,
+            subPlaces: []
+        });
+        setIsDefaultDescriptionLocked(true);
         setShowPlaceForm(false);
         setEditingPlaceId(null);
     };
@@ -314,15 +387,22 @@ function App() {
             name: place.name,
             title: place.title,
             description: place.description,
+            alternativeDescription: place.alternativeDescription || '',
+            activeDescriptionSource: place.activeDescriptionSource || 'default',
             image: customImages[place.id] || place.image,
             image2: customImages[`${place.id}-2`] || place.image2,
             subPlaces: structuredSubPlaces
         });
+        setIsDefaultDescriptionLocked(true);
         setEditingPlaceId(place.id);
         setShowPlaceForm(true);
     };
 
     const handleNewPlaceImage = async (e) => {
+        if (!isAdmin) {
+            alert("Only admin can change images.");
+            return;
+        }
         const file = e.target.files[0];
         if (file) {
             const resized = await resizeImage(file);
@@ -331,6 +411,10 @@ function App() {
     };
 
     const handleNewPlaceImage2 = async (e) => {
+        if (!isAdmin) {
+            alert("Only admin can change images.");
+            return;
+        }
         const file = e.target.files[0];
         if (file) {
             const resized = await resizeImage(file);
@@ -340,6 +424,10 @@ function App() {
 
 
     const handleGalleryUpload = async (e) => {
+        if (!isAdmin) {
+            alert("Only admin can add images.");
+            return;
+        }
         const files = Array.from(e.target.files);
         if (files.length > 0 && editingPlaceId) {
             const galleryKey = editingPlaceId;
@@ -355,6 +443,10 @@ function App() {
     };
 
     const handleGalleryDelete = (imageToDelete) => {
+        if (!isAdmin) {
+            alert("Only admin can remove images.");
+            return;
+        }
         // Prevent deleting default images
         const defaultImages = galleryDataRaw[editingPlaceId] || [];
         if (defaultImages.includes(imageToDelete)) {
@@ -374,6 +466,10 @@ function App() {
     };
 
     const setFromGallery = (imgUrl, type) => {
+        if (!isAdmin) {
+            alert("Only admin can change selected images.");
+            return;
+        }
         if (type === 'primary') {
             setNewPlace(prev => ({ ...prev, image: imgUrl }));
         } else {
@@ -384,7 +480,13 @@ function App() {
     const currentGallery = editingPlaceId ? (placesGallery[editingPlaceId] || []) : [];
 
     const allPlaces = [...placesList, ...userPlaces];
-
+    const getEffectiveDescription = (placeItem) => {
+        const altText = (placeItem?.alternativeDescription || '').trim();
+        if (placeItem?.activeDescriptionSource === 'alternative' && altText) {
+            return altText;
+        }
+        return placeItem?.description || '';
+    };
     const paginatePlaces = () => {
         const flowItems = [];
         for (let d = 1; d <= numDays; d++) {
@@ -399,7 +501,7 @@ function App() {
                     destId: item.id
                 });
 
-                const paragraphs = (item.description || '').split('\n').filter(p => p.trim());
+                const paragraphs = getEffectiveDescription(item).split('\n').filter(p => p.trim());
                 paragraphs.forEach((p, pIdx) => {
                     flowItems.push({
                         type: 'dest-para',
@@ -430,41 +532,118 @@ function App() {
             }
         }
 
-        const pages = [];
-        let currentPage = [];
-        let currentPageWeight = 0;
+        const BOTTOM_SIGNAL_MM = 2;
+        const PAGE_HEIGHT_MM = 297;
 
-        flowItems.forEach((item, index) => {
+        const getItemWeight = (item) => {
             let weight = 0;
             if (item.type === 'dayNote') {
                 const linesRaw = (item.text || '').split('\n').filter(l => l.trim());
-                weight = 0.5 + (linesRaw.length * 0.2);
+                weight = 0.42 + (linesRaw.length * 0.16);
             } else if (item.type === 'dest-head') {
-                weight = 1.3; // Header + Images (smaller base to allow sharing)
-                if (item.image2) weight += 0.3;
+                weight = 1.2;
+                if (item.image2) weight += 0.25;
             } else if (item.type === 'dest-para') {
-                weight = Math.max(0.1, (item.text || '').length / 800);
+                weight = Math.max(0.07, (item.text || '').length / 980);
             } else if (item.type === 'dest-highlight-point') {
-                weight = 0.22; // Individual point weight
+                const sub = item.highlight;
+                const subName = typeof sub === 'string' ? sub : (sub?.name || '');
+                const subDesc = typeof sub === 'string' ? '' : (sub?.description || '');
+                const pointLen = (subName + ' ' + subDesc).trim().length;
+                weight = Math.max(0.16, 0.08 + (pointLen / 760));
+            }
+            return weight;
+        };
+
+        const packItems = (items, firstCap, otherCap) => {
+            const packed = [];
+            let current = [];
+            let currentWeight = 0;
+
+            for (let index = 0; index < items.length; index++) {
+                const item = items[index];
+                const weight = getItemWeight(item);
+                const isFirstPackedPage = packed.length === 0;
+                const maxWeight = isFirstPackedPage ? firstCap : otherCap;
+
+                // Keep destination head (title + images) with at least one following content block.
+                // This prevents "images on one page, text on next page" for any city.
+                if (item.type === 'dest-head') {
+                    const nextItem = items[index + 1];
+                    const sameDestNext =
+                        nextItem &&
+                        nextItem.destId === item.destId &&
+                        (nextItem.type === 'dest-para' || nextItem.type === 'dest-highlight-point');
+
+                    if (sameDestNext) {
+                        const pairWeight = weight + getItemWeight(nextItem);
+                        if (currentWeight + pairWeight > maxWeight && current.length > 0) {
+                            packed.push([...current]);
+                            current = [];
+                            currentWeight = 0;
+                        }
+                    }
+                }
+
+                if (currentWeight + weight > maxWeight && current.length > 0) {
+                    packed.push([...current]);
+                    current = [];
+                    currentWeight = 0;
+                }
+
+                current.push(item);
+                currentWeight += weight;
+
+                if (index === items.length - 1 && current.length > 0) {
+                    packed.push([...current]);
+                }
             }
 
-            const isFirstPage = pages.length === 0;
-            // First page has the premium header and welcome text, so it needs less content weight capacity.
-            const maxWeight = isFirstPage ? 3.2 : 5.0;
+            if (packed.length === 0) packed.push([]);
+            return packed;
+        };
 
-            if (currentPageWeight + weight > maxWeight && currentPage.length > 0) {
-                pages.push([...currentPage]);
-                currentPage = [];
-                currentPageWeight = 0;
+        // Header only on first page, footer only on last page.
+        const firstPageCapacity = 3.4 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM); // header + welcome
+        const middlePageCapacity = 5.95 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM); // no header/footer
+        const lastPageCapacity = 4.75 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM); // footer only (safe but fuller)
+        const singlePageCapacity = 3.15 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM); // header + footer
+
+        let pages = packItems(flowItems, firstPageCapacity, middlePageCapacity);
+
+        const getPageWeight = (items) => items.reduce((sum, it) => sum + getItemWeight(it), 0);
+        while (pages.length > 0) {
+            const lastIdx = pages.length - 1;
+            const lastPage = pages[lastIdx];
+            const cap = pages.length === 1 ? singlePageCapacity : lastPageCapacity;
+            let lastWeight = getPageWeight(lastPage);
+
+            if (lastWeight <= cap) break;
+
+            const overflowItems = [];
+            while (lastPage.length > 0 && lastWeight > cap) {
+                overflowItems.unshift(lastPage.pop());
+                lastWeight = getPageWeight(lastPage);
             }
 
-            currentPage.push(item);
-            currentPageWeight += weight;
-
-            if (index === flowItems.length - 1) {
-                pages.push([...currentPage]);
+            // Safety: never leave a destination head orphaned at page end.
+            // If the page ends with `dest-head` and no following item from same destination,
+            // move that head to next page along with overflow.
+            if (lastPage.length > 0) {
+                const tail = lastPage[lastPage.length - 1];
+                if (tail.type === 'dest-head') {
+                    overflowItems.unshift(lastPage.pop());
+                    lastWeight = getPageWeight(lastPage);
+                }
             }
-        });
+
+            if (lastPage.length === 0) {
+                pages.pop();
+            }
+
+            const overflowPages = packItems(overflowItems, middlePageCapacity, middlePageCapacity);
+            pages = [...pages, ...overflowPages];
+        }
 
         if (pages.length === 0) pages.push([]);
         return pages;
@@ -531,6 +710,87 @@ function App() {
                 setIsGenerating(false);
             }
         }, 1500);
+    };
+
+    const buildCityPdfPlace = (sourcePlace, selectedIndexes = null) => {
+        const allSubPlaces = Array.isArray(sourcePlace?.allSubPlaces)
+            ? sourcePlace.allSubPlaces
+            : (Array.isArray(sourcePlace?.subPlaces) ? sourcePlace.subPlaces : []);
+        const defaultIndexes = allSubPlaces.map((_, idx) => idx);
+        const safeIndexes = Array.isArray(selectedIndexes) ? selectedIndexes : defaultIndexes;
+        const selectedSet = new Set(safeIndexes);
+        const selectedSubPlaces = allSubPlaces.filter((_, idx) => selectedSet.has(idx));
+
+        return {
+            ...sourcePlace,
+            allSubPlaces,
+            subPlaces: selectedSubPlaces,
+            effectiveDescription: sourcePlace?.effectiveDescription || getEffectiveDescription(sourcePlace)
+        };
+    };
+
+    const openCityPreview = (place) => {
+        if (!place) return;
+        const allSubPlaces = Array.isArray(place?.subPlaces) ? place.subPlaces : [];
+        const allIndexes = allSubPlaces.map((_, idx) => idx);
+        setCityPdfSelectedSubIndexes(allIndexes);
+        setCityPdfPlace(buildCityPdfPlace({ ...place, allSubPlaces }, allIndexes));
+        setShowCityPreview(true);
+    };
+
+    const closeCityPreview = () => {
+        setShowCityPreview(false);
+        if (!isGeneratingCityPdf) {
+            setCityPdfPlace(null);
+            setCityPdfSelectedSubIndexes([]);
+        }
+    };
+
+    const generateCityPDF = async (placeParam = null) => {
+        if (!placeParam && !cityPdfPlace) return;
+        const sourcePlace = placeParam || cityPdfPlace;
+        const preparedPlace = placeParam
+            ? buildCityPdfPlace({ ...placeParam, allSubPlaces: Array.isArray(placeParam?.subPlaces) ? placeParam.subPlaces : [] })
+            : buildCityPdfPlace(sourcePlace, cityPdfSelectedSubIndexes);
+        setCityPdfPlace(preparedPlace);
+        setIsGeneratingCityPdf(true);
+
+        setTimeout(async () => {
+            try {
+                await downloadCityPdfFromContainer(CITY_PDF_CONTAINER_ID, preparedPlace.name);
+            } catch (error) {
+                console.error(error);
+                alert("Error generating city PDF. Please try again.");
+            } finally {
+                setIsGeneratingCityPdf(false);
+                if (!showCityPreview) {
+                    setCityPdfPlace(null);
+                    setCityPdfSelectedSubIndexes([]);
+                }
+            }
+        }, 700);
+    };
+
+    const toggleCitySubPlace = (index) => {
+        if (!cityPdfPlace) return;
+        const nextIndexes = cityPdfSelectedSubIndexes.includes(index)
+            ? cityPdfSelectedSubIndexes.filter(i => i !== index)
+            : [...cityPdfSelectedSubIndexes, index];
+        setCityPdfSelectedSubIndexes(nextIndexes);
+        setCityPdfPlace(prev => buildCityPdfPlace(prev, nextIndexes));
+    };
+
+    const selectAllCitySubPlaces = () => {
+        if (!cityPdfPlace) return;
+        const allIndexes = (cityPdfPlace.allSubPlaces || []).map((_, idx) => idx);
+        setCityPdfSelectedSubIndexes(allIndexes);
+        setCityPdfPlace(prev => buildCityPdfPlace(prev, allIndexes));
+    };
+
+    const clearAllCitySubPlaces = () => {
+        if (!cityPdfPlace) return;
+        setCityPdfSelectedSubIndexes([]);
+        setCityPdfPlace(prev => buildCityPdfPlace(prev, []));
     };
 
     const totalSelected = Object.values(itinerary).reduce((acc, curr) => acc + curr.length, 0);
@@ -692,15 +952,65 @@ function App() {
                                         Set your travel dates and starting points to begin building your itinerary.
                                     </p>
 
+                                    <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', marginBottom: '22px', padding: '14px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px' }}>
+                                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0, fontSize: '0.9rem', textTransform: 'none', letterSpacing: 0 }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={useTravelDates}
+                                                onChange={() => setUseTravelDates(true)}
+                                            />
+                                            I have arrival and departure dates
+                                        </label>
+                                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0, fontSize: '0.9rem', textTransform: 'none', letterSpacing: 0 }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={!useTravelDates}
+                                                onChange={() => setUseTravelDates(false)}
+                                            />
+                                            I only know days and nights count
+                                        </label>
+                                    </div>
+
                                     <div className="setup-grid" style={{ marginTop: '20px' }}>
-                                        <div className="setup-item">
-                                            <label><Calendar size={16} /> Arrival Date</label>
-                                            <input type="date" value={arrivalDate} onChange={(e) => setArrivalDate(e.target.value)} className="modern-input" />
-                                        </div>
-                                        <div className="setup-item">
-                                            <label><Calendar size={16} /> Departure Date</label>
-                                            <input type="date" value={departureDate} onChange={(e) => setDepartureDate(e.target.value)} className="modern-input" />
-                                        </div>
+                                        {useTravelDates ? (
+                                            <>
+                                                <div className="setup-item">
+                                                    <label><Calendar size={16} /> Arrival Date</label>
+                                                    <input type="date" value={arrivalDate} onChange={(e) => setArrivalDate(e.target.value)} className="modern-input" />
+                                                </div>
+                                                <div className="setup-item">
+                                                    <label><Calendar size={16} /> Departure Date</label>
+                                                    <input type="date" value={departureDate} onChange={(e) => setDepartureDate(e.target.value)} className="modern-input" />
+                                                </div>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <div className="setup-item">
+                                                    <label><Calendar size={16} /> Number of Days</label>
+                                                    <input
+                                                        type="number"
+                                                        min="1"
+                                                        max="30"
+                                                        value={manualDaysCount}
+                                                        onChange={(e) => setManualDaysCount(e.target.value)}
+                                                        className="modern-input"
+                                                        placeholder="e.g. 7"
+                                                    />
+                                                </div>
+                                                <div className="setup-item">
+                                                    <label><Calendar size={16} /> Number of Nights</label>
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        max="29"
+                                                        value={manualNightsCount}
+                                                        onChange={(e) => setManualNightsCount(e.target.value)}
+                                                        className="modern-input"
+                                                        placeholder="e.g. 6"
+                                                    />
+                                                </div>
+                                            </>
+                                        )}
                                         <div className="setup-item">
                                             <label><MapPin size={16} /> Trip Start Point</label>
                                             <input type="text" placeholder="e.g. Colombo Airport" value={tripStart} onChange={(e) => setTripStart(e.target.value)} className="modern-input" />
@@ -708,6 +1018,16 @@ function App() {
                                         <div className="setup-item">
                                             <label><MapPin size={16} /> Trip End Point</label>
                                             <input type="text" placeholder="e.g. Colombo Airport" value={tripEnd} onChange={(e) => setTripEnd(e.target.value)} className="modern-input" />
+                                        </div>
+                                        <div className="setup-item">
+                                            <label><Plane size={16} /> Flight Details (Optional)</label>
+                                            <input
+                                                type="text"
+                                                placeholder="e.g. UL 402 | 10:45 AM | CMB to DXB"
+                                                value={flightDetails}
+                                                onChange={(e) => setFlightDetails(e.target.value)}
+                                                className="modern-input"
+                                            />
                                         </div>
                                     </div>
 
@@ -763,7 +1083,17 @@ function App() {
                                             style={{ width: 'auto', whiteSpace: 'nowrap', padding: '12px 22px' }}
                                             onClick={() => {
                                                 setEditingPlaceId(null);
-                                                setNewPlace({ name: '', title: '', description: '', specialNote: '', image: null, image2: null, subPlaces: [] });
+                                                setNewPlace({
+                                                    name: '',
+                                                    title: '',
+                                                    description: '',
+                                                    alternativeDescription: '',
+                                                    activeDescriptionSource: 'default',
+                                                    image: null,
+                                                    image2: null,
+                                                    subPlaces: []
+                                                });
+                                                setIsDefaultDescriptionLocked(true);
                                                 setShowPlaceForm(true);
                                             }}
                                         >
@@ -796,6 +1126,13 @@ function App() {
                                                             onClick={(e) => openEditModal(e, p)}
                                                         >
                                                             <Edit2 size={14} /> Edit Data
+                                                        </button>
+                                                        <button
+                                                            className="btn btn-outline btn-sm"
+                                                            style={{ width: '100%', marginTop: '10px' }}
+                                                            onClick={() => openCityPreview(p)}
+                                                        >
+                                                            <Eye size={14} /> Preview City PDF
                                                         </button>
                                                     </div>
                                                 </div>
@@ -1004,7 +1341,7 @@ function App() {
                                                         </div>
 
                                                         <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '15px', lineHeight: '1.5' }}>
-                                                            {(place.description || '').substring(0, 150)}...
+                                                            {(getEffectiveDescription(item) || '').substring(0, 150)}...
                                                         </p>
 
                                                         {place.subPlaces && place.subPlaces.length > 0 && (
@@ -1131,9 +1468,13 @@ function App() {
                             <h2 style={{ marginBottom: '20px', color: 'var(--primary)' }}>Itinerary Status</h2>
 
                             <div className="status-card" style={{ background: '#f8fafc', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-                                <div style={{ marginBottom: '15px' }}>
+                                    <div style={{ marginBottom: '15px' }}>
                                     <div style={{ fontSize: '0.8rem', color: '#64748b' }}>Current Duration</div>
-                                    <div style={{ fontWeight: 'bold' }}>{numDays} Days / {Math.max(0, numDays - 1)} Nights</div>
+                                    <div style={{ fontWeight: 'bold' }}>
+                                        {useTravelDates
+                                            ? `${numDays} Days / ${Math.max(0, numDays - 1)} Nights`
+                                            : `${Math.max(1, parseInt(manualDaysCount, 10) || 1)} Days / ${Math.max(0, parseInt(manualNightsCount, 10) || 0)} Nights`}
+                                    </div>
                                 </div>
                                 <div style={{ marginBottom: '15px' }}>
                                     <div style={{ fontSize: '0.8rem', color: '#64748b' }}>Active Day</div>
@@ -1191,8 +1532,12 @@ function App() {
                                 pages={pagesData}
                                 arrivalDate={arrivalDate}
                                 departureDate={departureDate}
+                                useTravelDates={useTravelDates}
+                                manualDaysCount={manualDaysCount}
+                                manualNightsCount={manualNightsCount}
                                 tripStart={tripStart}
                                 tripEnd={tripEnd}
+                                flightDetails={flightDetails}
                                 customImages={customImages}
                                 showDayNote={showDayNote}
                                 dayNoteText={dayNoteText}
@@ -1202,6 +1547,13 @@ function App() {
                     </div>
                 )
             }
+            {(isGeneratingCityPdf || showCityPreview) && cityPdfPlace && (
+                <div style={{ position: 'fixed', left: '-2000mm', top: 0, width: '210mm', backgroundColor: 'white', zIndex: -1000 }}>
+                    <div id={CITY_PDF_CONTAINER_ID}>
+                        <CityPDFContent place={cityPdfPlace} />
+                    </div>
+                </div>
+            )}
 
             <AnimatePresence>
                 {showPreview && (
@@ -1222,8 +1574,12 @@ function App() {
                                         pages={pagesData}
                                         arrivalDate={arrivalDate}
                                         departureDate={departureDate}
+                                        useTravelDates={useTravelDates}
+                                        manualDaysCount={manualDaysCount}
+                                        manualNightsCount={manualNightsCount}
                                         tripStart={tripStart}
                                         tripEnd={tripEnd}
+                                        flightDetails={flightDetails}
                                         customImages={customImages}
                                         isPreview={true}
                                         showDayNote={showDayNote}
@@ -1241,6 +1597,77 @@ function App() {
                                     disabled={isGenerating}
                                 >
                                     {isGenerating ? <div className="spinner"></div> : <><Download size={20} /> Download PDF</>}
+                                </button>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+                {showCityPreview && cityPdfPlace && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="modal-overlay"
+                    >
+                        <div className="modal-content">
+                            <button className="close-btn" onClick={closeCityPreview}>
+                                <X size={24} />
+                            </button>
+
+                            <div className="pdf-viewer-scroll">
+                                <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                    {Array.isArray(cityPdfPlace.allSubPlaces) && cityPdfPlace.allSubPlaces.length > 0 && (
+                                        <div style={{ width: '100%', maxWidth: '794px', margin: '0 auto 16px', padding: '14px', background: '#ffffff', borderRadius: '10px', border: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 5, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
+                                            <div style={{ fontSize: '0.82rem', fontWeight: '700', color: '#334155', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '8px' }}>
+                                                Select Highlights for This City PDF
+                                            </div>
+                                            <details>
+                                                <summary style={{ cursor: 'pointer', listStyle: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px 12px', fontSize: '0.85rem', color: '#334155', userSelect: 'none' }}>
+                                                    <span>{cityPdfSelectedSubIndexes.length} selected</span>
+                                                    <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Open</span>
+                                                </summary>
+                                                <div style={{ marginTop: '10px' }}>
+                                                    <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                                                        <button type="button" className="btn btn-outline btn-sm" style={{ width: 'auto', padding: '8px 14px', marginTop: 0 }} onClick={selectAllCitySubPlaces}>Select All</button>
+                                                        <button type="button" className="btn btn-outline btn-sm" style={{ width: 'auto', padding: '8px 14px', marginTop: 0 }} onClick={clearAllCitySubPlaces}>Clear All</button>
+                                                    </div>
+                                                    <div style={{ maxHeight: '190px', overflowY: 'auto', display: 'grid', gridTemplateColumns: '1fr', gap: '8px' }}>
+                                                        {cityPdfPlace.allSubPlaces.map((sub, idx) => {
+                                                            const subName = typeof sub === 'string' ? sub : (sub.name || `Place ${idx + 1}`);
+                                                            return (
+                                                                <label key={idx} style={{ display: 'flex', gap: '8px', alignItems: 'center', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px', cursor: 'pointer', marginBottom: 0, textTransform: 'none', letterSpacing: 0, fontSize: '0.84rem' }}>
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={cityPdfSelectedSubIndexes.includes(idx)}
+                                                                        onChange={() => toggleCitySubPlace(idx)}
+                                                                    />
+                                                                    <span style={{ color: '#334155' }}>{subName}</span>
+                                                                </label>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            </details>
+                                            <div style={{ fontSize: '0.74rem', color: '#64748b', marginTop: '8px' }}>
+                                                Only selected highlights will appear in the city PDF.
+                                            </div>
+                                        </div>
+                                    )}
+                                    <CityPDFContent place={cityPdfPlace} />
+                                </div>
+                            </div>
+
+                            <div style={{ padding: '20px', textAlign: 'center', background: '#f5f5f5', borderTop: '1px solid #ddd' }}>
+                                <button
+                                    className="btn btn-primary"
+                                    style={{ width: '250px' }}
+                                    onClick={() => generateCityPDF(cityPdfPlace)}
+                                    disabled={isGeneratingCityPdf}
+                                >
+                                    {isGeneratingCityPdf ? <div className="spinner"></div> : <><Download size={20} /> Download City PDF</>}
                                 </button>
                             </div>
                         </div>
@@ -1291,7 +1718,8 @@ function App() {
                                             {newPlace.image && (
                                                 <img src={newPlace.image} alt="Preview" className="input-preview-img" />
                                             )}
-                                            <input type="file" accept="image/*" onChange={handleNewPlaceImage} />
+                                            <input type="file" accept="image/*" onChange={handleNewPlaceImage} disabled={!isAdmin} />
+                                            {!isAdmin && <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Admin only</div>}
                                         </div>
                                     </div>
 
@@ -1301,20 +1729,69 @@ function App() {
                                             {newPlace.image2 && (
                                                 <img src={newPlace.image2} alt="Preview" className="input-preview-img" />
                                             )}
-                                            <input type="file" accept="image/*" onChange={handleNewPlaceImage2} />
+                                            <input type="file" accept="image/*" onChange={handleNewPlaceImage2} disabled={!isAdmin} />
+                                            {!isAdmin && <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Admin only</div>}
                                         </div>
                                     </div>
                                 </div>
 
                                 <div className="form-right-col">
                                     <div className="form-group full-height">
-                                        <label>Description (Full details)</label>
-                                        <textarea
-                                            style={{ width: '100%', height: '320px', padding: '15px', borderRadius: '8px', border: '1px solid #ddd', resize: 'none', overflowY: 'auto', fontFamily: 'inherit' }}
-                                            value={newPlace.description}
-                                            onChange={(e) => setNewPlace({ ...newPlace, description: e.target.value })}
-                                            placeholder="Enter the detailed description for the itinerary..."
-                                        />
+                                        <div className="desc-manager">
+                                            <div className="desc-card">
+                                                <div className="desc-card-header">
+                                                    <label className="desc-card-title">Description (Full details)</label>
+                                                    <button
+                                                        type="button"
+                                                        className={`desc-lock-btn ${isDefaultDescriptionLocked ? 'locked' : ''}`}
+                                                        onClick={() => setIsDefaultDescriptionLocked(prev => !prev)}
+                                                    >
+                                                        {isDefaultDescriptionLocked ? 'Locked' : 'Unlocked'}
+                                                    </button>
+                                                </div>
+                                                <textarea
+                                                    className={`desc-textarea ${isDefaultDescriptionLocked ? 'is-locked' : ''}`}
+                                                    value={newPlace.description}
+                                                    onChange={(e) => setNewPlace({ ...newPlace, description: e.target.value })}
+                                                    placeholder="Enter the detailed description for the itinerary..."
+                                                    readOnly={isDefaultDescriptionLocked}
+                                                />
+                                            </div>
+
+                                            <div className="desc-card alt">
+                                                <div className="desc-card-header">
+                                                    <label className="desc-card-title">Alternative Description (Temporary)</label>
+                                                    <span className="desc-tag">Session Only</span>
+                                                </div>
+                                                <textarea
+                                                    className="desc-textarea alt"
+                                                    value={newPlace.alternativeDescription || ''}
+                                                    onChange={(e) => setNewPlace({ ...newPlace, alternativeDescription: e.target.value })}
+                                                    placeholder="Temporary text for current session only. Clears after refresh."
+                                                />
+                                            </div>
+
+                                            <div className="desc-source-switch" role="group" aria-label="Description source selector">
+                                                <button
+                                                    type="button"
+                                                    className={`desc-source-btn ${(newPlace.activeDescriptionSource || 'default') === 'default' ? 'active' : ''}`}
+                                                    onClick={() => setNewPlace({ ...newPlace, activeDescriptionSource: 'default' })}
+                                                >
+                                                    Use Full Details in PDF
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className={`desc-source-btn ${newPlace.activeDescriptionSource === 'alternative' ? 'active' : ''}`}
+                                                    onClick={() => setNewPlace({ ...newPlace, activeDescriptionSource: 'alternative' })}
+                                                >
+                                                    Use Alternative in PDF
+                                                </button>
+                                            </div>
+
+                                            <div className="desc-footnote">
+                                                Alternative description is not saved to database and will be cleared after page refresh.
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                                 <div className="form-group modal-full-row" style={{ padding: '0 10px 20px' }}>
@@ -1493,9 +1970,9 @@ function App() {
                                                 loading="lazy"
                                             />
                                             <div className="gallery-overlays">
-                                                <button className={`gallery-btn primary ${newPlace.image === img ? 'active' : ''}`} onClick={() => setFromGallery(img, 'primary')} title="Set as Primary">1</button>
-                                                <button className={`gallery-btn secondary ${newPlace.image2 === img ? 'active' : ''}`} onClick={() => setFromGallery(img, 'secondary')} title="Set as Secondary">2</button>
-                                                {!(galleryDataRaw[editingPlaceId] || []).includes(img) && (
+                                                <button className={`gallery-btn primary ${newPlace.image === img ? 'active' : ''}`} onClick={() => setFromGallery(img, 'primary')} title="Set as Primary" disabled={!isAdmin}>1</button>
+                                                <button className={`gallery-btn secondary ${newPlace.image2 === img ? 'active' : ''}`} onClick={() => setFromGallery(img, 'secondary')} title="Set as Secondary" disabled={!isAdmin}>2</button>
+                                                {isAdmin && !(galleryDataRaw[editingPlaceId] || []).includes(img) && (
                                                     <button className="gallery-btn delete" onClick={() => handleGalleryDelete(img)} title="Remove"><Trash2 size={12} /></button>
                                                 )}
                                             </div>
@@ -1506,15 +1983,28 @@ function App() {
                                     {currentGallery.length === 0 && <p style={{ gridColumn: '1/-1', color: '#999', fontSize: '0.9rem' }}>No images in gallery. Upload below.</p>}
                                 </div>
 
-                                <label className="btn btn-outline btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', cursor: 'pointer', marginTop: '10px' }}>
+                                <label
+                                    className="btn btn-outline btn-sm"
+                                    style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '5px',
+                                        cursor: isAdmin ? 'pointer' : 'not-allowed',
+                                        marginTop: '10px',
+                                        opacity: isAdmin ? 1 : 0.55
+                                    }}
+                                >
                                     <Plus size={16} /> Add Photos to Gallery
-                                    <input type="file" multiple accept="image/*" onChange={handleGalleryUpload} style={{ display: 'none' }} />
+                                    <input type="file" multiple accept="image/*" onChange={handleGalleryUpload} style={{ display: 'none' }} disabled={!isAdmin} />
                                 </label>
+                                {!isAdmin && <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '8px' }}>Gallery add/remove is admin only.</div>}
                             </div>
 
                             <div className="modal-actions">
                                 <button className="btn btn-primary" onClick={handleAddPlace}>
-                                    {editingPlaceId ? 'Update Destination' : 'Add Destination'}
+                                    {editingPlaceId
+                                        ? (newPlace.activeDescriptionSource === 'alternative' ? 'Update Destination + Alt Description' : 'Update Destination')
+                                        : (newPlace.activeDescriptionSource === 'alternative' ? 'Add Destination + Alt Description' : 'Add Destination')}
                                 </button>
                             </div>
                         </div>
@@ -1552,15 +2042,40 @@ const PDFPage = ({ children, pageNumber, totalPages, generationTime }) => (
     </div>
 );
 
-const PDFContent = ({ pages, arrivalDate, departureDate, tripStart, tripEnd, customImages, isPreview, generationTime, showDayNote = {}, dayNoteText = {} }) => {
+const PDFContent = ({
+    pages,
+    arrivalDate,
+    departureDate,
+    useTravelDates = true,
+    manualDaysCount = 1,
+    manualNightsCount = 0,
+    tripStart,
+    tripEnd,
+    flightDetails = '',
+    customImages,
+    isPreview,
+    generationTime,
+    showDayNote = {},
+    dayNoteText = {}
+}) => {
     const calculateTourHeading = () => {
-        if (!arrivalDate || !departureDate) return "TOUR ITINERARY TO SRI LANKA";
-        const start = new Date(arrivalDate);
-        const end = new Date(departureDate);
-        const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
-        const nights = Math.max(0, days - 1);
+        let days = 0;
+        let nights = 0;
+
+        if (useTravelDates && arrivalDate && departureDate) {
+            const start = new Date(arrivalDate);
+            const end = new Date(departureDate);
+            days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+            nights = Math.max(0, days - 1);
+        } else {
+            days = Math.max(1, parseInt(manualDaysCount, 10) || 1);
+            nights = Math.max(0, parseInt(manualNightsCount, 10) || 0);
+        }
+
         return `${String(nights).padStart(2, '0')} NIGHTS ${String(days).padStart(2, '0')} DAYS TOUR ITINERARY TO SRI LANKA`;
     };
+
+    const renderedDayLabels = new Set();
 
     return (
         <div className="pdf-preview-container">
@@ -1572,51 +2087,76 @@ const PDFContent = ({ pages, arrivalDate, departureDate, tripStart, tripEnd, cus
                         generationTime={pageIndex === 0 ? generationTime : null}
                     >
                         {pageIndex === 0 && (
-                            <>
+                            <div className="pdf-fixed-header">
                                 <div className="pdf-header-premium">
-                                    <div className="pdf-logo-wrapper">
-                                        <img src="/logo.png" alt="Logo" className="pdf-logo-main" />
+                                <div className="pdf-logo-wrapper">
+                                    <img src="/logo.png" alt="Logo" className="pdf-logo-main" />
+                                </div>
+                                <div className="pdf-header-divider"></div>
+                                <div className="pdf-header-info">
+                                    <div style={{
+                                        marginTop: '5px',
+                                        padding: '10px 0',
+                                        borderTop: '2px solid var(--primary)',
+                                        borderBottom: '2px solid var(--primary)',
+                                        textAlign: 'center',
+                                        fontWeight: 'bold',
+                                        fontSize: '1.2rem',
+                                        color: '#1a365d'
+                                    }}>
+                                        {calculateTourHeading()}
                                     </div>
-                                    <div className="pdf-header-divider"></div>
-                                    <div className="pdf-header-info">
-                                        <div style={{
-                                            marginTop: '5px',
-                                            padding: '10px 0',
-                                            borderTop: '2px solid var(--primary)',
-                                            borderBottom: '2px solid var(--primary)',
-                                            textAlign: 'center',
-                                            fontWeight: 'bold',
-                                            fontSize: '1.2rem',
-                                            color: '#1a365d'
-                                        }}>
-                                            {calculateTourHeading()}
-                                        </div>
 
-                                        <div className="pdf-header-details-grid" style={{ marginTop: '15px' }}>
-                                            <div className="pdf-header-col">
-                                                <div className="pdf-date-badge">
-                                                    <span className="label">ARRIVAL DATE</span>
-                                                    <span className="value">{arrivalDate ? new Date(arrivalDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'TBD'}</span>
-                                                </div>
-                                                <div className="pdf-date-badge">
-                                                    <span className="label">DEPARTURE DATE</span>
-                                                    <span className="value">{departureDate ? new Date(departureDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'TBD'}</span>
-                                                </div>
+                                    <div className="pdf-header-details-grid" style={{ marginTop: '15px' }}>
+                                        <div className="pdf-header-col">
+                                            {useTravelDates ? (
+                                                <>
+                                                    <div className="pdf-date-badge">
+                                                        <span className="label">ARRIVAL DATE</span>
+                                                        <span className="value">{arrivalDate ? new Date(arrivalDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'TBD'}</span>
+                                                    </div>
+                                                    <div className="pdf-date-badge">
+                                                        <span className="label">DEPARTURE DATE</span>
+                                                        <span className="value">{departureDate ? new Date(departureDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'TBD'}</span>
+                                                    </div>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <div className="pdf-date-badge">
+                                                        <span className="label">DAYS COUNT</span>
+                                                        <span className="value">{Math.max(1, parseInt(manualDaysCount, 10) || 1)}</span>
+                                                    </div>
+                                                    <div className="pdf-date-badge">
+                                                        <span className="label">NIGHTS COUNT</span>
+                                                        <span className="value">{Math.max(0, parseInt(manualNightsCount, 10) || 0)}</span>
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                        <div className="pdf-header-col">
+                                            <div className="pdf-date-badge">
+                                                <span className="label">START POINT</span>
+                                                <span className="value">{tripStart || 'Colombo / Airport'}</span>
                                             </div>
-                                            <div className="pdf-header-col">
-                                                <div className="pdf-date-badge">
-                                                    <span className="label">START POINT</span>
-                                                    <span className="value">{tripStart || 'Colombo / Airport'}</span>
-                                                </div>
-                                                <div className="pdf-date-badge">
-                                                    <span className="label">END POINT</span>
-                                                    <span className="value">{tripEnd || 'Colombo / Airport'}</span>
-                                                </div>
+                                            <div className="pdf-date-badge">
+                                                <span className="label">END POINT</span>
+                                                <span className="value">{tripEnd || 'Colombo / Airport'}</span>
                                             </div>
+                                            {flightDetails?.trim() && (
+                                                <div className="pdf-date-badge">
+                                                    <span className="label">FLIGHT DETAILS</span>
+                                                    <span className="value">{flightDetails}</span>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
+                            </div>
+                            </div>
+                        )}
 
+                        <div className="pdf-fixed-content">
+                            {pageIndex === 0 && (
                                 <div className="pdf-welcome-section">
                                     <div className="welcome-tag">Ayubowan!</div>
                                     <p>
@@ -1624,10 +2164,9 @@ const PDFContent = ({ pages, arrivalDate, departureDate, tripStart, tripEnd, cus
                                         the very best of our breathtaking landscapes and cultural heritage.
                                     </p>
                                 </div>
-                            </>
-                        )}
+                            )}
 
-                        <div className="pdf-itinerary-list">
+                            <div className="pdf-itinerary-list">
                             {(() => {
                                 const grouped = [];
                                 let currentGroup = null;
@@ -1671,18 +2210,27 @@ const PDFContent = ({ pages, arrivalDate, departureDate, tripStart, tripEnd, cus
 
                                     const hasHead = group.parts.some(p => p.type === 'dest-head');
                                     const headItem = group.parts.find(p => p.type === 'dest-head');
+                                    const dayKey = `day-${group.sample.day}`;
+                                    const showDayLabel = !renderedDayLabels.has(dayKey);
+                                    if (showDayLabel) {
+                                        renderedDayLabels.add(dayKey);
+                                    }
                                     const dayText = `DAY ${String(group.sample.day).padStart(2, '0')}`;
 
                                     return (
                                         <div key={`${group.destId}-${gIdx}`} className="pdf-day-item" style={{ marginBottom: '20px' }}>
                                             <div className="pdf-day-header" style={{ marginBottom: hasHead ? '12px' : '4px', borderBottom: hasHead ? '2px solid #f8f8f8' : 'none' }}>
-                                                <div className="day-number" style={{ fontSize: hasHead ? '2.2rem' : '1.2rem', whiteSpace: 'nowrap' }}>
-                                                    {dayText}
-                                                </div>
+                                                {showDayLabel && (
+                                                    <div className="day-number" style={{ fontSize: hasHead ? '2.2rem' : '1.2rem', whiteSpace: 'nowrap' }}>
+                                                        {dayText}
+                                                    </div>
+                                                )}
                                                 <div className="day-title-wrapper">
-                                                    <h2 style={{ fontSize: hasHead ? '1.8rem' : '1.3rem' }}>
-                                                        {group.sample.name} {!hasHead && <span style={{ fontSize: '0.8rem', opacity: 0.6, fontWeight: 'normal', marginLeft: '5px', textTransform: 'uppercase' }}>(continued)</span>}
-                                                    </h2>
+                                                    {hasHead && (
+                                                        <h2 style={{ fontSize: '1.8rem' }}>
+                                                            {group.sample.name}
+                                                        </h2>
+                                                    )}
                                                     {hasHead && <div className="day-subtitle">{headItem.title}</div>}
                                                 </div>
                                             </div>
@@ -1707,66 +2255,72 @@ const PDFContent = ({ pages, arrivalDate, departureDate, tripStart, tripEnd, cus
                                                     </div>
                                                 )}
                                                 <div className="pdf-day-description" style={{ flex: 1 }}>
-                                                    <p style={{ whiteSpace: 'pre-line' }}>
-                                                        {group.parts.filter(p => p.type === 'dest-para').map(para => para.text).join('\n\n')}
-                                                    </p>
-
-                                                    {group.parts.some(p => p.type === 'dest-highlight-point') && (
-                                                        <div className="pdf-sub-places" style={{ marginTop: '10px' }}>
-                                                            <ul style={{ listStyleType: 'disc', paddingLeft: '20px' }}>
-                                                                {group.parts.filter(p => p.type === 'dest-highlight-point').map((pointItem, sIdx) => {
-                                                                    const sub = pointItem.highlight;
-                                                                    const rawSubName = typeof sub === 'string' ? sub : sub.name;
-                                                                    const subName = rawSubName.charAt(0).toUpperCase() + rawSubName.slice(1).toLowerCase();
-                                                                    const subDesc = typeof sub === 'string' ? '' : sub.description;
-                                                                    return (
-                                                                        <li key={sIdx} style={{ marginBottom: '10px', lineHeight: '1.5' }}>
-                                                                            <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                                                                <span style={{ fontWeight: '700', color: '#1a365d', fontSize: '0.9rem' }}>{subName}</span>
-                                                                                {subDesc && (
-                                                                                    <div style={{ fontSize: '0.85rem', color: '#4a5568', marginTop: '4px', lineHeight: '1.4', wordBreak: 'break-word', whiteSpace: 'normal' }}>
-                                                                                        {subDesc}
-                                                                                    </div>
-                                                                                )}
-                                                                            </div>
-                                                                        </li>
-                                                                    );
-                                                                })}
-                                                            </ul>
-                                                        </div>
-                                                    )}
+                                                    {(() => {
+                                                        const paraParts = group.parts.filter(p => p.type === 'dest-para');
+                                                        return paraParts.map((para, pIdx) => (
+                                                            <p key={pIdx} style={{ whiteSpace: 'pre-line', marginBottom: pIdx === paraParts.length - 1 ? 0 : '10px' }}>
+                                                                {para.text}
+                                                            </p>
+                                                        ));
+                                                    })()}
                                                 </div>
                                             </div>
+                                            {group.parts.some(p => p.type === 'dest-highlight-point') && (
+                                                <div className="pdf-sub-places" style={{ marginTop: '10px', width: '100%' }}>
+                                                    <ul style={{ listStyleType: 'disc', paddingLeft: '18px', marginLeft: 0, textAlign: 'left' }}>
+                                                        {group.parts.filter(p => p.type === 'dest-highlight-point').map((pointItem, sIdx) => {
+                                                            const sub = pointItem.highlight;
+                                                            const rawSubName = typeof sub === 'string' ? sub : sub.name;
+                                                            const subName = rawSubName.charAt(0).toUpperCase() + rawSubName.slice(1).toLowerCase();
+                                                            const subDesc = typeof sub === 'string' ? '' : sub.description;
+                                                            return (
+                                                                <li key={sIdx} style={{ marginBottom: '10px', lineHeight: '1.5', textAlign: 'left' }}>
+                                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                                                                        <span style={{ fontWeight: '700', color: '#1a365d', fontSize: '0.9rem' }}>{subName}</span>
+                                                                        {subDesc && (
+                                                                            <div style={{ fontSize: '0.85rem', color: '#4a5568', marginTop: '4px', lineHeight: '1.4', wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                                                                                {subDesc}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                </li>
+                                                            );
+                                                        })}
+                                                    </ul>
+                                                </div>
+                                            )}
                                         </div>
                                     );
                                 });
                             })()}
+                            </div>
                         </div>
 
-
-                        <div className="pdf-footer-premium">
-                            <div className="footer-top">
-                                <div className="footer-brand">
-                                    <h3>INVEL HOLIDAYS SRI LANKA</h3>
-                                    <p>www.invelsrilanka.com</p>
-                                    <p style={{ fontSize: '0.75rem', marginTop: '10px', opacity: 0.8 }}>© {new Date().getFullYear()} Invel Holidays - Where Journeys Become Stories</p>
-                                </div>
-                                <div className="footer-contact-grid">
-                                    <div className="contact-item">
-                                        <MapPin size={10} style={{ marginRight: '5px' }} />
-                                        No. 197/43A, Vihara Mawatha, Athurugiriya, Sri Lanka.
+                        {pageIndex === pages.length - 1 && (
+                            <div className="pdf-footer-premium pdf-fixed-footer">
+                                <div className="footer-top">
+                                    <div className="footer-brand">
+                                        <h3>INVEL HOLIDAYS SRI LANKA</h3>
+                                        <p>www.invelsrilanka.com</p>
+                                        <p style={{ fontSize: '0.75rem', marginTop: '10px', opacity: 0.8 }}>(c) {new Date().getFullYear()} Invel Holidays - Where Journeys Become Stories</p>
                                     </div>
-                                    <div className="contact-item">
-                                        <Globe size={10} style={{ marginRight: '5px' }} />
-                                        invelholidays@gmail.com
-                                    </div>
-                                    <div className="contact-item">
-                                        <Phone size={10} style={{ marginRight: '5px' }} />
-                                        +94 11 588 2489
+                                    <div className="footer-contact-grid">
+                                        <div className="contact-item">
+                                            <MapPin size={10} style={{ marginRight: '5px' }} />
+                                            No. 197/43A, Vihara Mawatha, Athurugiriya, Sri Lanka.
+                                        </div>
+                                        <div className="contact-item">
+                                            <Globe size={10} style={{ marginRight: '5px' }} />
+                                            invelholidays@gmail.com
+                                        </div>
+                                        <div className="contact-item">
+                                            <Phone size={10} style={{ marginRight: '5px' }} />
+                                            +94 11 588 2489
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
+                        )}
                     </PDFPage>
                     {pageIndex < pages.length - 1 && isPreview && (
                         <div className="page-break-indicator">Next Page</div>
@@ -1778,3 +2332,4 @@ const PDFContent = ({ pages, arrivalDate, departureDate, tripStart, tripEnd, cus
 };
 
 export default App;
+
