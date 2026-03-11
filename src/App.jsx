@@ -728,12 +728,20 @@ function App() {
                 }
 
                 if ((item.citySpecialNote || '').trim()) {
-                    flowItems.push({
-                        type: 'cityNote',
-                        text: item.citySpecialNote,
-                        day: d,
-                        destId: item.id,
-                        name: item.name
+                    const cityNoteLines = item.citySpecialNote
+                        .split('\n')
+                        .map((line) => line.trim())
+                        .filter(Boolean);
+                    cityNoteLines.forEach((line, lineIdx) => {
+                        flowItems.push({
+                            type: 'city-note-point',
+                            text: line,
+                            isFirst: lineIdx === 0,
+                            isLast: lineIdx === cityNoteLines.length - 1,
+                            day: d,
+                            destId: item.id,
+                            name: item.name
+                        });
                     });
                 }
             });
@@ -761,10 +769,15 @@ function App() {
                 const subName = typeof sub === 'string' ? sub : (sub?.name || '');
                 const subDesc = typeof sub === 'string' ? '' : (sub?.description || '');
                 const pointLen = (subName + ' ' + subDesc).trim().length;
-                weight = Math.max(0.16, 0.08 + (pointLen / 760));
-            } else if (item.type === 'cityNote') {
-                const linesRaw = (item.text || '').split('\n').filter(l => l.trim());
-                weight = 0.2 + (linesRaw.length * 0.12);
+                weight = Math.max(0.2, 0.12 + (pointLen / 620));
+            } else if (item.type === 'city-note-point') {
+                const noteLen = (item.text || '').trim().length;
+                // First city-note line also carries the visual box title/container overhead.
+                if (item.isFirst) {
+                    weight = Math.max(0.42, 0.28 + (noteLen / 520));
+                } else {
+                    weight = Math.max(0.22, 0.14 + (noteLen / 620));
+                }
             }
             return weight;
         };
@@ -787,7 +800,7 @@ function App() {
                     const sameDestNext =
                         nextItem &&
                         nextItem.destId === item.destId &&
-                        (nextItem.type === 'dest-para' || nextItem.type === 'dest-highlight-point');
+                        (nextItem.type === 'dest-para' || nextItem.type === 'dest-highlight-point' || nextItem.type === 'city-note-point');
 
                     if (sameDestNext) {
                         const pairWeight = weight + getItemWeight(nextItem);
@@ -796,6 +809,20 @@ function App() {
                             current = [];
                             currentWeight = 0;
                         }
+                    }
+                }
+
+                // Hard guard: if city-note block starts after a dense city section (e.g. many highlights),
+                // move it to the next page early to avoid footer overlap.
+                if (item.type === 'city-note-point' && item.isFirst) {
+                    const hasSameDestHighlights = current.some(
+                        (it) => it.destId === item.destId && it.type === 'dest-highlight-point'
+                    );
+                    const denseThreshold = maxWeight * 0.66;
+                    if (hasSameDestHighlights && currentWeight > denseThreshold && current.length > 0) {
+                        packed.push([...current]);
+                        current = [];
+                        currentWeight = 0;
                     }
                 }
 
@@ -818,12 +845,12 @@ function App() {
         };
 
         // Header only on first page, footer only on last page.
-        const firstPageCapacity = 3.4 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM); // header + welcome
+        const firstPageCapacity = 3.25 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM); // header + welcome (safer)
         // Slightly relaxed ceiling for page 1 so short city content can follow "Airport - Arrival" when space allows.
-        const firstPageFillCapacity = (3.95 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM));
-        const middlePageCapacity = 5.95 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM); // no header/footer
-        const lastPageCapacity = 4.75 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM); // footer only (safe but fuller)
-        const singlePageCapacity = 3.15 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM); // header + footer
+        const firstPageFillCapacity = (3.7 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM));
+        const middlePageCapacity = 5.6 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM); // no header/footer (safer)
+        const lastPageCapacity = 4.45 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM); // footer only (safer)
+        const singlePageCapacity = 3.0 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM); // header + footer (safer)
 
         let pages = packItems(flowItems, firstPageCapacity, middlePageCapacity);
 
@@ -877,7 +904,7 @@ function App() {
                     const hasPairedContent =
                         maybeNext &&
                         maybeNext.destId === firstFromSecond.destId &&
-                        (maybeNext.type === 'dest-para' || maybeNext.type === 'dest-highlight-point');
+                        (maybeNext.type === 'dest-para' || maybeNext.type === 'dest-highlight-point' || maybeNext.type === 'city-note-point');
                     if (hasPairedContent) moveCount = 2;
                 }
 
@@ -1685,7 +1712,7 @@ function App() {
                                                 </motion.div>
                                             )}
 
-                                            <div style={{ marginBottom: '20px' }}>
+                                            <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'flex-end' }}>
                                                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 'bold', cursor: 'pointer', background: '#f8fafc', padding: '8px 15px', borderRadius: '10px', border: '1px solid #e2e8f0', width: 'fit-content' }}>
                                                     <input
                                                         type="checkbox"
@@ -2854,15 +2881,16 @@ const PDFContent = ({
                                                     </ul>
                                                 </div>
                                             )}
-                                            {group.parts.some(p => p.type === 'cityNote') && (
+                                            {group.parts.some(p => p.type === 'city-note-point') && (
                                                 <div style={{ marginTop: '10px', width: '100%', background: '#eef8ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '10px 12px' }}>
                                                     <div style={{ fontSize: '0.82rem', fontWeight: '700', color: '#1e3a8a', textTransform: 'uppercase', marginBottom: '6px' }}>
                                                         City Special Note
                                                     </div>
                                                     <ul style={{ listStyleType: 'disc', paddingLeft: '18px', margin: 0, textAlign: 'left' }}>
                                                         {group.parts
-                                                            .filter(p => p.type === 'cityNote')
-                                                            .flatMap(notePart => (notePart.text || '').split('\n').filter(line => line.trim()))
+                                                            .filter(p => p.type === 'city-note-point')
+                                                            .map(notePart => (notePart.text || '').trim())
+                                                            .filter(Boolean)
                                                             .map((line, lineIdx) => (
                                                                 <li key={lineIdx} style={{ marginBottom: '6px', fontSize: '0.88rem', color: '#1e293b', lineHeight: '1.45' }}>
                                                                     {line.trim()}
