@@ -13,6 +13,7 @@ import RouteMapPlanner, { RouteMapPdfPage, hasRenderableRouteMapPlan } from './c
 
 const ROUTE_MAP_SNAPSHOT_KEY = 'route_map_saved_snapshot_v1';
 const LOGIN_ROLE_KEY = 'itinerary_login_role_v1';
+const SUB_PLACES_BACKUP_KEY = 'destination_sub_places_backup_v1';
 const LOCAL_LOGIN_CREDENTIALS = {
     admin: 'admin',
     user: 'user',
@@ -59,6 +60,51 @@ const resizeImage = (file, maxWidth = 1000, quality = 0.7) => {
     });
 };
 
+const getSubPlaceName = (sub) => {
+    if (typeof sub === 'string') return sub.trim();
+    if (!sub || typeof sub !== 'object') return '';
+    const raw = sub.name || sub.title || sub.place || sub.label || '';
+    return String(raw).trim();
+};
+
+const normalizeSubPlaces = (rawSubPlaces) => {
+    if (typeof rawSubPlaces === 'string') {
+        return rawSubPlaces
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .map((name) => ({ name, description: '' }));
+    }
+
+    if (!Array.isArray(rawSubPlaces)) return [];
+
+    const normalized = rawSubPlaces
+        .map((entry) => {
+            if (typeof entry === 'string') {
+                const name = entry.trim();
+                return name ? { name, description: '' } : null;
+            }
+            if (!entry || typeof entry !== 'object') return null;
+
+            const name = getSubPlaceName(entry);
+            const descriptionRaw = entry.description || entry.details || entry.note || '';
+            const description = typeof descriptionRaw === 'string' ? descriptionRaw.trim() : '';
+            if (!name) return null;
+            return { name, description };
+        })
+        .filter(Boolean);
+
+    const deduped = [];
+    const seen = new Set();
+    normalized.forEach((item) => {
+        const key = item.name.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        deduped.push(item);
+    });
+    return deduped;
+};
+
 function App() {
     const [numDays, setNumDays] = useState(1);
     const [activeDay, setActiveDay] = useState(1);
@@ -85,6 +131,8 @@ function App() {
     const [searchTerm, setSearchTerm] = useState('');
     const [showDayNote, setShowDayNote] = useState({}); // { 1: true, 2: false }
     const [dayNoteText, setDayNoteText] = useState({}); // { 1: "Note for day 1" }
+    const [showCityNote, setShowCityNote] = useState({}); // { 1: true, 2: false }
+    const [selectedCityForNote, setSelectedCityForNote] = useState({}); // { 1: 0, 2: 1 }
     const [routeMapPlan, setRouteMapPlan] = useState({ enabled: false, attachToFinalPdf: false, stops: [], routeCoords: [] });
     const routeMapPlanRef = useRef(routeMapPlan);
 
@@ -133,14 +181,38 @@ function App() {
                 if (!destError && destData) {
                     const dbPlacesMap = {};
                     const newCustomPlaces = [];
+                    const restoreQueue = [];
+                    let backupMap = {};
+                    try {
+                        const rawBackup = localStorage.getItem(SUB_PLACES_BACKUP_KEY) || '{}';
+                        const parsed = JSON.parse(rawBackup);
+                        if (parsed && typeof parsed === 'object') backupMap = parsed;
+                    } catch (_err) {
+                        backupMap = {};
+                    }
+                    const nextBackupMap = { ...backupMap };
 
                     destData.forEach(dbPlace => {
+                        const seedPlace = places.find((p) => p.id === dbPlace.id);
+                        const dbSubPlaces = normalizeSubPlaces(dbPlace.sub_places);
+                        const backupSubPlaces = normalizeSubPlaces(backupMap[dbPlace.id]);
+                        const seedSubPlaces = normalizeSubPlaces(seedPlace?.subPlaces);
+                        const resolvedSubPlaces = dbSubPlaces.length > 0
+                            ? dbSubPlaces
+                            : (backupSubPlaces.length > 0 ? backupSubPlaces : seedSubPlaces);
+
                         const formattedPlace = {
                             ...dbPlace,
-                            subPlaces: dbPlace.sub_places || [],
+                            subPlaces: resolvedSubPlaces,
                         };
 
                         dbPlacesMap[dbPlace.id] = formattedPlace;
+                        if (resolvedSubPlaces.length > 0) {
+                            nextBackupMap[dbPlace.id] = resolvedSubPlaces;
+                        }
+                        if (dbSubPlaces.length === 0 && resolvedSubPlaces.length > 0) {
+                            restoreQueue.push({ id: dbPlace.id, sub_places: resolvedSubPlaces });
+                        }
 
                         if (String(dbPlace.id).startsWith('custom-')) {
                             newCustomPlaces.push({
@@ -165,11 +237,32 @@ function App() {
                                 image2: dbP.image_url_2 || pl.image2,
                             };
                         }
+                        const seedSubPlaces = normalizeSubPlaces(pl.subPlaces);
+                        if (seedSubPlaces.length > 0) {
+                            nextBackupMap[pl.id] = seedSubPlaces;
+                        }
                         return pl;
                     }));
 
                     if (newCustomPlaces.length > 0) {
                         setUserPlaces(newCustomPlaces);
+                    }
+
+                    try {
+                        localStorage.setItem(SUB_PLACES_BACKUP_KEY, JSON.stringify(nextBackupMap));
+                    } catch (_err) {
+                        // Ignore localStorage errors.
+                    }
+
+                    if (restoreQueue.length > 0) {
+                        await Promise.all(
+                            restoreQueue.map((row) =>
+                                supabase
+                                    .from('destinations')
+                                    .update({ sub_places: row.sub_places })
+                                    .eq('id', row.id)
+                            )
+                        );
                     }
                 }
 
@@ -212,10 +305,13 @@ function App() {
     const [isDefaultDescriptionLocked, setIsDefaultDescriptionLocked] = useState(true);
     const [newSubPlace, setNewSubPlace] = useState({ name: '', description: '' });
     const [newDayPoint, setNewDayPoint] = useState('');
+    const [newCityPoint, setNewCityPoint] = useState('');
     const [editingSubPlaceIdx, setEditingSubPlaceIdx] = useState(null);
     const [editingSubValue, setEditingSubValue] = useState({ name: '', description: '' });
     const [editingDayPointIdx, setEditingDayPointIdx] = useState(null);
     const [editingDayPointValue, setEditingDayPointValue] = useState('');
+    const [editingCityPointIdx, setEditingCityPointIdx] = useState(null);
+    const [editingCityPointValue, setEditingCityPointValue] = useState('');
     const [showPlaceForm, setShowPlaceForm] = useState(false);
     const [editingPlaceId, setEditingPlaceId] = useState(null);
     const [placesGallery, setPlacesGallery] = useState(galleryDataRaw);
@@ -370,7 +466,7 @@ function App() {
                 ...prev,
                 [activeDay]: alreadySelected
                     ? currentDayPlaces.filter(p => p.id !== place.id)
-                    : [...currentDayPlaces, { ...place, selectedSubPlaces: [] }]
+                    : [...currentDayPlaces, { ...place, selectedSubPlaces: [], citySpecialNote: '' }]
             };
         });
     };
@@ -382,6 +478,13 @@ function App() {
             alert("Please provide place name, description and image.");
             return;
         }
+        const normalizedSubPlaces = normalizeSubPlaces(newPlace.subPlaces);
+        const normalizedPlace = {
+            ...newPlace,
+            subPlaces: normalizedSubPlaces
+        };
+
+        const persistedPlaceId = editingPlaceId || `custom-${Date.now()}`;
 
         if (editingPlaceId) {
             // Edit existing
@@ -390,18 +493,19 @@ function App() {
             try {
                 await supabase.from('destinations').upsert({
                     id: editingPlaceId,
-                    name: newPlace.name,
-                    title: newPlace.title,
-                    description: newPlace.description,
-                    image_url: newPlace.image,
-                    image_url_2: newPlace.image2,
-                    sub_places: newPlace.subPlaces
+                    name: normalizedPlace.name,
+                    title: normalizedPlace.title,
+                    description: normalizedPlace.description,
+                    image_url: normalizedPlace.image,
+                    image_url_2: normalizedPlace.image2,
+                    sub_places: normalizedSubPlaces
                 });
             } catch (e) {
                 console.error("Failed to update Supabase", e);
+                alert("Failed to update destination in backend. Local changes are kept.");
             }
 
-            const updateFn = (list) => list.map(p => p.id === editingPlaceId ? { ...newPlace, id: editingPlaceId } : p);
+            const updateFn = (list) => list.map(p => p.id === editingPlaceId ? { ...normalizedPlace, id: editingPlaceId } : p);
 
             if (editingPlaceId.toString().startsWith('custom-')) {
                 setUserPlaces(updateFn);
@@ -418,10 +522,10 @@ function App() {
                             // Find matching objects in new subPlaces for currently selected ones
                             const updatedSelected = (p.selectedSubPlaces || []).map(currentSelected => {
                                 const currentName = typeof currentSelected === 'string' ? currentSelected : currentSelected.name;
-                                const match = (newPlace.subPlaces || []).find(sp => (typeof sp === 'string' ? sp : sp.name) === currentName);
+                                const match = (normalizedSubPlaces || []).find(sp => (typeof sp === 'string' ? sp : sp.name) === currentName);
                                 return match || currentSelected;
                             });
-                            return { ...newPlace, id: editingPlaceId, selectedSubPlaces: updatedSelected };
+                            return { ...normalizedPlace, id: editingPlaceId, selectedSubPlaces: updatedSelected, citySpecialNote: p.citySpecialNote || '' };
                         }
                         return p;
                     });
@@ -430,24 +534,35 @@ function App() {
             });
         } else {
             // Add new
-            const id = `custom-${Date.now()}`;
-            const p = { ...newPlace, id };
+            const id = persistedPlaceId;
+            const p = { ...normalizedPlace, id };
 
             try {
                 await supabase.from('destinations').insert({
                     id: id,
-                    name: newPlace.name,
-                    title: newPlace.title || '',
-                    description: newPlace.description,
-                    image_url: newPlace.image,
-                    image_url_2: newPlace.image2,
-                    sub_places: newPlace.subPlaces
+                    name: normalizedPlace.name,
+                    title: normalizedPlace.title || '',
+                    description: normalizedPlace.description,
+                    image_url: normalizedPlace.image,
+                    image_url_2: normalizedPlace.image2,
+                    sub_places: normalizedSubPlaces
                 });
             } catch (e) {
                 console.error("Failed to insert into Supabase", e);
+                alert("Failed to save new destination in backend. Local changes are kept.");
             }
 
             setUserPlaces(prev => [...prev, p]);
+        }
+
+        try {
+            const rawBackup = localStorage.getItem(SUB_PLACES_BACKUP_KEY) || '{}';
+            const parsed = JSON.parse(rawBackup);
+            const nextBackup = parsed && typeof parsed === 'object' ? parsed : {};
+            nextBackup[persistedPlaceId] = normalizedSubPlaces;
+            localStorage.setItem(SUB_PLACES_BACKUP_KEY, JSON.stringify(nextBackup));
+        } catch (_err) {
+            // Ignore localStorage errors.
         }
 
         setNewPlace({
@@ -467,10 +582,7 @@ function App() {
 
     const openEditModal = (e, place) => {
         e.stopPropagation();
-        // Convert any string-only subPlaces to objects for the new structured UI
-        const structuredSubPlaces = (place.subPlaces || []).map(sp =>
-            typeof sp === 'string' ? { name: sp, description: '' } : sp
-        );
+        const structuredSubPlaces = normalizeSubPlaces(place.subPlaces);
 
         setNewPlace({
             name: place.name,
@@ -614,6 +726,16 @@ function App() {
                         });
                     });
                 }
+
+                if ((item.citySpecialNote || '').trim()) {
+                    flowItems.push({
+                        type: 'cityNote',
+                        text: item.citySpecialNote,
+                        day: d,
+                        destId: item.id,
+                        name: item.name
+                    });
+                }
             });
 
             if (showDayNote[d] && dayNoteText[d]) {
@@ -640,6 +762,9 @@ function App() {
                 const subDesc = typeof sub === 'string' ? '' : (sub?.description || '');
                 const pointLen = (subName + ' ' + subDesc).trim().length;
                 weight = Math.max(0.16, 0.08 + (pointLen / 760));
+            } else if (item.type === 'cityNote') {
+                const linesRaw = (item.text || '').split('\n').filter(l => l.trim());
+                weight = 0.2 + (linesRaw.length * 0.12);
             }
             return weight;
         };
@@ -694,6 +819,8 @@ function App() {
 
         // Header only on first page, footer only on last page.
         const firstPageCapacity = 3.4 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM); // header + welcome
+        // Slightly relaxed ceiling for page 1 so short city content can follow "Airport - Arrival" when space allows.
+        const firstPageFillCapacity = (3.95 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM));
         const middlePageCapacity = 5.95 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM); // no header/footer
         const lastPageCapacity = 4.75 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM); // footer only (safe but fuller)
         const singlePageCapacity = 3.15 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM); // header + footer
@@ -732,6 +859,39 @@ function App() {
 
             const overflowPages = packItems(overflowItems, middlePageCapacity, middlePageCapacity);
             pages = [...pages, ...overflowPages];
+        }
+
+        if (pages.length > 1) {
+            const firstPage = pages[0];
+            const secondPage = pages[1];
+            let firstWeight = getPageWeight(firstPage);
+
+            while (secondPage.length > 0) {
+                const firstFromSecond = secondPage[0];
+                let moveCount = 1;
+
+                // If next page starts with a destination head, keep at least one following same-destination
+                // content block together when moving to page 1.
+                if (firstFromSecond.type === 'dest-head') {
+                    const maybeNext = secondPage[1];
+                    const hasPairedContent =
+                        maybeNext &&
+                        maybeNext.destId === firstFromSecond.destId &&
+                        (maybeNext.type === 'dest-para' || maybeNext.type === 'dest-highlight-point');
+                    if (hasPairedContent) moveCount = 2;
+                }
+
+                const movingItems = secondPage.slice(0, moveCount);
+                const movingWeight = movingItems.reduce((sum, it) => sum + getItemWeight(it), 0);
+                if (firstWeight + movingWeight > firstPageFillCapacity) break;
+
+                firstPage.push(...secondPage.splice(0, moveCount));
+                firstWeight += movingWeight;
+            }
+
+            if (secondPage.length === 0) {
+                pages.splice(1, 1);
+            }
         }
 
         if (pages.length === 0) pages.push([]);
@@ -934,6 +1094,30 @@ function App() {
     };
 
     const totalSelected = Object.values(itinerary).reduce((acc, curr) => acc + curr.length, 0);
+    const activeDayCities = itinerary[activeDay] || [];
+    const selectedCityIndexRaw = Number(selectedCityForNote[activeDay] ?? 0);
+    const selectedCityIndex = Number.isFinite(selectedCityIndexRaw)
+        ? Math.min(Math.max(0, selectedCityIndexRaw), Math.max(0, activeDayCities.length - 1))
+        : 0;
+    const selectedCityItemForNote = activeDayCities[selectedCityIndex] || null;
+    const selectedCityMaster = selectedCityItemForNote
+        ? allPlaces.find(p => p.id === (selectedCityItemForNote.id || selectedCityItemForNote.cityId))
+        : null;
+    const selectedCityNoteText = selectedCityItemForNote?.citySpecialNote || '';
+
+    const updateSelectedCityNote = (nextTextUpdater) => {
+        if (!selectedCityItemForNote) return;
+        const itemId = selectedCityItemForNote.id || selectedCityItemForNote.cityId;
+        setItinerary(prev => {
+            const nextDay = [...(prev[activeDay] || [])];
+            const itemIdx = nextDay.findIndex(p => (p.id || p.cityId) === itemId);
+            if (itemIdx === -1) return prev;
+            const currentText = nextDay[itemIdx]?.citySpecialNote || '';
+            const nextText = typeof nextTextUpdater === 'function' ? nextTextUpdater(currentText) : nextTextUpdater;
+            nextDay[itemIdx] = { ...nextDay[itemIdx], citySpecialNote: nextText };
+            return { ...prev, [activeDay]: nextDay };
+        });
+    };
 
     if (!isLoading && !sessionRole) {
         return (
@@ -1315,7 +1499,10 @@ function App() {
                                                         {p.subPlaces && p.subPlaces.length > 0 && (
                                                             <div style={{ marginBottom: '15px' }}>
                                                                 <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--primary)', textTransform: 'uppercase' }}>Highlights:</span>
-                                                                <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '5px' }}>{p.subPlaces.slice(0, 3).join(', ')}{p.subPlaces.length > 3 ? '...' : ''}</p>
+                                                                <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '5px' }}>
+                                                                    {p.subPlaces.slice(0, 3).map(getSubPlaceName).filter(Boolean).join(', ')}
+                                                                    {p.subPlaces.length > 3 ? '...' : ''}
+                                                                </p>
                                                             </div>
                                                         )}
 
@@ -1498,9 +1685,166 @@ function App() {
                                                 </motion.div>
                                             )}
 
+                                            <div style={{ marginBottom: '20px' }}>
+                                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 'bold', cursor: 'pointer', background: '#f8fafc', padding: '8px 15px', borderRadius: '10px', border: '1px solid #e2e8f0', width: 'fit-content' }}>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={showCityNote[activeDay] || false}
+                                                        onChange={(e) => {
+                                                            const checked = e.target.checked;
+                                                            setShowCityNote(prev => ({ ...prev, [activeDay]: checked }));
+                                                            if (checked && activeDayCities.length > 0 && (selectedCityForNote[activeDay] == null)) {
+                                                                setSelectedCityForNote(prev => ({ ...prev, [activeDay]: 0 }));
+                                                            }
+                                                        }}
+                                                    />
+                                                    Add Special Note for City (Day {activeDay})?
+                                                </label>
+                                            </div>
+
+                                            {showCityNote[activeDay] && (
+                                                <motion.div
+                                                    initial={{ opacity: 0, y: -10 }}
+                                                    animate={{ opacity: 1, y: 0 }}
+                                                    style={{ marginBottom: '25px', padding: '20px', background: '#eef8ff', borderRadius: '12px', border: '1px solid #bfdbfe' }}
+                                                >
+                                                    {activeDayCities.length === 0 ? (
+                                                        <div style={{ fontSize: '0.85rem', color: '#1e3a8a' }}>Add at least one city to Day {activeDay} to write city-wise notes.</div>
+                                                    ) : (
+                                                        <>
+                                                            <div className="form-group" style={{ marginBottom: '12px' }}>
+                                                                <label style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#1e3a8a' }}>Select City</label>
+                                                                <select
+                                                                    className="modern-input"
+                                                                    value={selectedCityIndex}
+                                                                    onChange={(e) => {
+                                                                        setSelectedCityForNote(prev => ({ ...prev, [activeDay]: Number(e.target.value) }));
+                                                                        setEditingCityPointIdx(null);
+                                                                        setEditingCityPointValue('');
+                                                                        setNewCityPoint('');
+                                                                    }}
+                                                                >
+                                                                    {activeDayCities.map((cityItem, cityIdx) => {
+                                                                        const master = allPlaces.find(p => p.id === (cityItem.id || cityItem.cityId));
+                                                                        return (
+                                                                            <option key={`${cityItem.id || cityItem.cityId}-${cityIdx}`} value={cityIdx}>
+                                                                                {master?.name || cityItem.name || `City ${cityIdx + 1}`}
+                                                                            </option>
+                                                                        );
+                                                                    })}
+                                                                </select>
+                                                            </div>
+
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
+                                                                {(selectedCityNoteText || '').split('\n').filter(p => p.trim()).map((point, pIdx) => (
+                                                                    <div key={pIdx} style={{ background: 'white', padding: '10px 12px', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
+                                                                        {editingCityPointIdx === pIdx ? (
+                                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                                                <textarea
+                                                                                    value={editingCityPointValue}
+                                                                                    onChange={(e) => setEditingCityPointValue(e.target.value)}
+                                                                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #93c5fd', minHeight: '90px', background: 'white' }}
+                                                                                />
+                                                                                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                                                                                    <button
+                                                                                        onClick={() => {
+                                                                                            const points = (selectedCityNoteText || '').split('\n');
+                                                                                            points[pIdx] = editingCityPointValue.trim();
+                                                                                            updateSelectedCityNote(points.filter(Boolean).join('\n'));
+                                                                                            setEditingCityPointIdx(null);
+                                                                                        }}
+                                                                                        className="btn btn-primary"
+                                                                                        style={{ padding: '8px 14px', fontSize: '0.82rem' }}
+                                                                                    >
+                                                                                        Save
+                                                                                    </button>
+                                                                                    <button
+                                                                                        onClick={() => setEditingCityPointIdx(null)}
+                                                                                        className="btn btn-outline"
+                                                                                        style={{ padding: '8px 14px', fontSize: '0.82rem' }}
+                                                                                    >
+                                                                                        Cancel
+                                                                                    </button>
+                                                                                </div>
+                                                                            </div>
+                                                                        ) : (
+                                                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                                                <span style={{ fontSize: '0.88rem', color: '#1e293b', flex: 1 }}>• {point}</span>
+                                                                                <div style={{ display: 'flex', gap: '6px' }}>
+                                                                                    <button
+                                                                                        onClick={() => {
+                                                                                            setEditingCityPointIdx(pIdx);
+                                                                                            setEditingCityPointValue(point);
+                                                                                        }}
+                                                                                        style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#64748b', borderRadius: '6px', padding: '6px', cursor: 'pointer' }}
+                                                                                    >
+                                                                                        <Edit2 size={13} />
+                                                                                    </button>
+                                                                                    <button
+                                                                                        onClick={() => {
+                                                                                            const points = (selectedCityNoteText || '').split('\n');
+                                                                                            points.splice(pIdx, 1);
+                                                                                            updateSelectedCityNote(points.join('\n'));
+                                                                                        }}
+                                                                                        style={{ background: '#fff5f5', border: '1px solid #fed7d7', color: '#e53e3e', borderRadius: '6px', padding: '6px', cursor: 'pointer' }}
+                                                                                    >
+                                                                                        <Trash2 size={13} />
+                                                                                    </button>
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+
+                                                            <div style={{ borderTop: '1px dashed #93c5fd', paddingTop: '14px' }}>
+                                                                <div style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#1e3a8a', marginBottom: '8px' }}>
+                                                                    Add New Point for {selectedCityMaster?.name || selectedCityItemForNote?.name || 'Selected City'}
+                                                                </div>
+                                                                <textarea
+                                                                    placeholder="Type city-wise note point..."
+                                                                    value={newCityPoint}
+                                                                    onChange={(e) => setNewCityPoint(e.target.value)}
+                                                                    onKeyDown={(e) => {
+                                                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                                                            e.preventDefault();
+                                                                            if (!newCityPoint.trim()) return;
+                                                                            updateSelectedCityNote((current) => {
+                                                                                const next = current ? `${current}\n${newCityPoint.trim()}` : newCityPoint.trim();
+                                                                                return next;
+                                                                            });
+                                                                            setNewCityPoint('');
+                                                                        }
+                                                                    }}
+                                                                    style={{ width: '100%', padding: '12px', borderRadius: '10px', border: '1px solid #93c5fd', fontSize: '0.95rem', minHeight: '120px', background: 'white', resize: 'vertical' }}
+                                                                />
+                                                                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            if (!newCityPoint.trim()) return;
+                                                                            updateSelectedCityNote((current) => current ? `${current}\n${newCityPoint.trim()}` : newCityPoint.trim());
+                                                                            setNewCityPoint('');
+                                                                        }}
+                                                                        className="btn btn-primary"
+                                                                        style={{ padding: '9px 16px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '6px' }}
+                                                                    >
+                                                                        <Plus size={16} /> Add City Note Point
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                </motion.div>
+                                            )}
+
                                             {(itinerary[activeDay] || []).map((item, idx) => {
                                                 const place = allPlaces.find(p => p.id === (item.id || item.cityId));
                                                 if (!place) return null;
+                                                const placeSubPlaces = normalizeSubPlaces(
+                                                    (Array.isArray(item.subPlaces) && item.subPlaces.length > 0)
+                                                        ? item.subPlaces
+                                                        : place.subPlaces
+                                                );
 
                                                 return (
                                                     <motion.div
@@ -1543,7 +1887,18 @@ function App() {
                                                             {(getEffectiveDescription(item) || '').substring(0, 150)}...
                                                         </p>
 
-                                                        {place.subPlaces && place.subPlaces.length > 0 && (
+                                                        {(item.citySpecialNote || '').trim() && (
+                                                            <div style={{ marginBottom: '15px', padding: '10px 12px', background: '#eef8ff', border: '1px solid #bfdbfe', borderRadius: '8px' }}>
+                                                                <div style={{ fontSize: '0.76rem', fontWeight: 'bold', color: '#1e3a8a', marginBottom: '6px', textTransform: 'uppercase' }}>City Note</div>
+                                                                <ul style={{ margin: 0, paddingLeft: '18px' }}>
+                                                                    {(item.citySpecialNote || '').split('\n').filter(v => v.trim()).map((line, noteIdx) => (
+                                                                        <li key={noteIdx} style={{ fontSize: '0.83rem', color: '#1e293b', marginBottom: '4px' }}>{line.trim()}</li>
+                                                                    ))}
+                                                                </ul>
+                                                            </div>
+                                                        )}
+
+                                                        {placeSubPlaces && placeSubPlaces.length > 0 && (
                                                             <div className="form-group" style={{ marginBottom: '15px' }}>
                                                                 <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Select Special Places to Visit</label>
                                                                 <select
@@ -1552,7 +1907,7 @@ function App() {
                                                                         const selectedIdx = e.target.value;
                                                                         if (selectedIdx === "") return;
 
-                                                                        const subToAdd = place.subPlaces[selectedIdx];
+                                                                        const subToAdd = placeSubPlaces[selectedIdx];
                                                                         const currentSelection = item.selectedSubPlaces || [];
 
                                                                         const subNameToAdd = typeof subToAdd === 'string' ? subToAdd : subToAdd.name;
@@ -1569,7 +1924,7 @@ function App() {
                                                                     value=""
                                                                 >
                                                                     <option value="" disabled>--- Select a Place to Add ---</option>
-                                                                    {place.subPlaces.map((sub, sIdx) => (
+                                                                    {placeSubPlaces.map((sub, sIdx) => (
                                                                         <option key={sIdx} value={sIdx}>{typeof sub === 'string' ? sub : sub.name}</option>
                                                                     ))}
                                                                 </select>
@@ -1646,7 +2001,7 @@ function App() {
                                                                 if (p) {
                                                                     setItinerary(prev => ({
                                                                         ...prev,
-                                                                        [activeDay]: [...(prev[activeDay] || []), { ...p, selectedSubPlaces: [], specialNote: '' }]
+                                                                        [activeDay]: [...(prev[activeDay] || []), { ...p, selectedSubPlaces: [], specialNote: '', citySpecialNote: '' }]
                                                                     }));
                                                                 }
                                                             }}
@@ -2496,6 +2851,23 @@ const PDFContent = ({
                                                                 </li>
                                                             );
                                                         })}
+                                                    </ul>
+                                                </div>
+                                            )}
+                                            {group.parts.some(p => p.type === 'cityNote') && (
+                                                <div style={{ marginTop: '10px', width: '100%', background: '#eef8ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '10px 12px' }}>
+                                                    <div style={{ fontSize: '0.82rem', fontWeight: '700', color: '#1e3a8a', textTransform: 'uppercase', marginBottom: '6px' }}>
+                                                        City Special Note
+                                                    </div>
+                                                    <ul style={{ listStyleType: 'disc', paddingLeft: '18px', margin: 0, textAlign: 'left' }}>
+                                                        {group.parts
+                                                            .filter(p => p.type === 'cityNote')
+                                                            .flatMap(notePart => (notePart.text || '').split('\n').filter(line => line.trim()))
+                                                            .map((line, lineIdx) => (
+                                                                <li key={lineIdx} style={{ marginBottom: '6px', fontSize: '0.88rem', color: '#1e293b', lineHeight: '1.45' }}>
+                                                                    {line.trim()}
+                                                                </li>
+                                                            ))}
                                                     </ul>
                                                 </div>
                                             )}
