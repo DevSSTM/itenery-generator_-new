@@ -2859,8 +2859,11 @@ const PDFPage = ({ children, pageNumber, totalPages, generationTime, footerExcep
                 style={{
                 position: 'absolute',
                 right: '10px',
-                top: '4px',
-                fontSize: '0.65rem',
+                top: '1px',
+                fontSize: '0.58rem',
+                lineHeight: 1.1,
+                margin: 0,
+                padding: 0,
                 opacity: 0.8,
                 fontStyle: 'italic',
                 color: 'var(--text-light)',
