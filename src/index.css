@@ -644,7 +644,7 @@ header {
     flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
-    padding-bottom: 18px;
+    padding-bottom: 7.6px; /* ~2mm safe bottom spacing */
 }
 
 .pdf-fixed-footer {

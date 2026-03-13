@@ -913,6 +913,17 @@ function App() {
     };
     const paginatePlaces = () => {
         const flowItems = [];
+        const isArrivalLike = (place) => {
+            const text = `${place?.name || ''} ${place?.title || ''} ${place?.id || ''}`.toLowerCase();
+            return text.includes('arrival');
+        };
+
+        const day1PlacesForRule = itinerary[1] || [];
+        const hasArrivalOnFirstPage = day1PlacesForRule.some((p) => isArrivalLike(p));
+        const firstCityDestIdWithoutArrival = !hasArrivalOnFirstPage && day1PlacesForRule.length > 0
+            ? (day1PlacesForRule[0].id || day1PlacesForRule[0].cityId || null)
+            : null;
+
         for (let d = 1; d <= numDays; d++) {
             const dayPlaces = itinerary[d] || [];
             dayPlaces.forEach(item => {
@@ -1013,7 +1024,7 @@ function App() {
         const ENTRY_GAP_MM = 2;
         const planner = new TypeScriptPdfLayoutEngine({
             page: { width: 210, height: 297 },
-            margins: { top: 5, right: 5, bottom: 8, left: 5 },
+            margins: { top: 5, right: 5, bottom: 2, left: 5 },
             headerHeightMm: 52,
             footerHeightMm: 20,
             blockGapMm: ENTRY_GAP_MM,
@@ -1026,8 +1037,13 @@ function App() {
             const current = flowItems[i];
             const next = flowItems[i + 1];
             const cityKey = `${current?.day ?? ''}-${current?.destId ?? ''}`;
+            const isFirstCityWithoutArrivalOnDay1 =
+                !hasArrivalOnFirstPage
+                && current?.day === 1
+                && current?.destId === firstCityDestIdWithoutArrival;
             const startsSubPlacesArea =
                 (current?.type === 'dest-highlight-point' || current?.type === 'city-note-point')
+                && !isFirstCityWithoutArrivalOnDay1
                 && !subPlacesPageBreakByCity.has(cityKey);
 
             if (startsSubPlacesArea) {
