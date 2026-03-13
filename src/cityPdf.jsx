@@ -76,20 +76,22 @@ const paginateCityFlow = (flowItems) => {
     try {
         plan = planner.layout(blocks);
     } catch (_err) {
-        return [flowItems];
+        return [{ items: flowItems, showHeader: true, showFooter: true }];
     }
     if (!plan.valid) {
-        return [flowItems];
+        return [{ items: flowItems, showHeader: true, showFooter: true }];
     }
 
     const itemById = new Map(flowItems.map((item, idx) => [`city-${idx}`, item]));
-    const pages = plan.pages.map((page) =>
-        page.blocks
+    const pages = plan.pages.map((page) => ({
+        items: page.blocks
             .map((b) => itemById.get(b.sourceId))
-            .filter(Boolean)
-    );
+            .filter(Boolean),
+        showHeader: page.showHeader,
+        showFooter: page.showFooter,
+    }));
 
-    return pages.length > 0 ? pages : [[]];
+    return pages.length > 0 ? pages : [{ items: [], showHeader: true, showFooter: true }];
 };
 
 const CityPdfHeader = () => (
@@ -150,7 +152,16 @@ export const CityPDFContent = ({ place }) => {
 
     return (
         <div className="pdf-preview-container">
-            {pages.map((pageItems, pageIndex) => {
+            {pages.map((pageData, pageIndex) => {
+                const pageItems = Array.isArray(pageData)
+                    ? pageData
+                    : (Array.isArray(pageData?.items) ? pageData.items : []);
+                const shouldRenderHeader = typeof pageData?.showHeader === 'boolean'
+                    ? pageData.showHeader
+                    : pageIndex === 0;
+                const shouldRenderFooter = typeof pageData?.showFooter === 'boolean'
+                    ? pageData.showFooter
+                    : pageIndex === pages.length - 1;
                 const headItem = pageItems.find(item => item.type === 'city-head');
                 const paragraphs = pageItems.filter(item => item.type === 'city-para').map(item => item.text);
                 const points = pageItems.filter(item => item.type === 'city-point');
@@ -159,7 +170,7 @@ export const CityPDFContent = ({ place }) => {
                 return (
                     <div key={`city-page-${pageIndex}`}>
                         <CityPdfPage>
-                            {pageIndex === 0 && (
+                            {shouldRenderHeader && (
                                 <div className="pdf-fixed-header city-pdf-fixed-header" data-pdf-role="header">
                                     <CityPdfHeader />
                                 </div>
@@ -232,7 +243,7 @@ export const CityPDFContent = ({ place }) => {
                                 </div>
                             </div>
 
-                            {pageIndex === pages.length - 1 && (
+                            {shouldRenderFooter && (
                                 <div className="pdf-fixed-footer" data-pdf-role="footer">
                                     <CityPdfFooter />
                                 </div>

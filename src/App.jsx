@@ -851,10 +851,10 @@ function App() {
         try {
             plan = planner.layout(blocks);
         } catch (_err) {
-            return [flowItems];
+            return [{ items: flowItems, showHeader: true, showFooter: true }];
         }
         if (!plan.valid) {
-            return [flowItems];
+            return [{ items: flowItems, showHeader: true, showFooter: true }];
         }
 
         const entryById = new Map(entries.map((entry) => [entry.id, entry]));
@@ -869,10 +869,14 @@ function App() {
                     if (item) pageItems.push(item);
                 });
             });
-            return pageItems;
+            return {
+                items: pageItems,
+                showHeader: page.showHeader,
+                showFooter: page.showFooter,
+            };
         });
 
-        return pages.length > 0 ? pages : [[]];
+        return pages.length > 0 ? pages : [{ items: [], showHeader: true, showFooter: true }];
     };
 
     const pagesData = paginatePlaces();
@@ -2584,14 +2588,25 @@ const PDFContent = ({
 
     return (
         <div className="pdf-preview-container">
-            {pages.map((items, pageIndex) => (
+            {pages.map((pageData, pageIndex) => {
+                const items = Array.isArray(pageData)
+                    ? pageData
+                    : (Array.isArray(pageData?.items) ? pageData.items : []);
+                const shouldRenderHeader = typeof pageData?.showHeader === 'boolean'
+                    ? pageData.showHeader
+                    : pageIndex === 0;
+                const shouldRenderFooter = typeof pageData?.showFooter === 'boolean'
+                    ? pageData.showFooter
+                    : pageIndex === pages.length - 1;
+
+                return (
                 <div key={pageIndex}>
                     <PDFPage
                         pageNumber={pageIndex + 1}
                         totalPages={pages.length}
                         generationTime={generationTime}
                     >
-                        {pageIndex === 0 && (
+                        {shouldRenderHeader && (
                             <div className="pdf-fixed-header" data-pdf-role="header">
                                 <div className="pdf-header-premium">
                                 <div className="pdf-logo-wrapper">
@@ -2819,7 +2834,7 @@ const PDFContent = ({
                             </div>
                         </div>
 
-                        {pageIndex === pages.length - 1 && (
+                        {shouldRenderFooter && (
                             <div className="pdf-footer-premium pdf-fixed-footer" data-pdf-role="footer">
                                 <div className="footer-top">
                                     <div className="footer-brand">
@@ -2849,7 +2864,8 @@ const PDFContent = ({
                         <div className="page-break-indicator">Next Page</div>
                     )}
                 </div>
-            ))}
+                );
+            })}
             {includeRouteMapPage && routeMapPlan && (
                 <div key="route-map-pdf-page">
                     <RouteMapPdfPage plan={routeMapPlan} showFooter />

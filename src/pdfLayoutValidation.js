@@ -49,7 +49,7 @@ export const validatePdfLayout = (container) => {
         if (!body) errors.push(`Page ${pageIndex + 1}: missing body area`);
 
         const shouldHaveHeader = multiplePages ? pageIndex === 0 : true;
-        const shouldHaveFooter = true;
+        const shouldHaveFooter = multiplePages ? pageIndex === pages.length - 1 : true;
         if (Boolean(header) !== shouldHaveHeader) {
             errors.push(`Page ${pageIndex + 1}: header placement rule failed`);
         }
