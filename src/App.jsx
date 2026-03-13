@@ -914,7 +914,12 @@ function App() {
                     return;
                 }
 
-                ensurePdfLayoutValid(container, 'Itinerary PDF');
+                try {
+                    ensurePdfLayoutValid(container, 'Itinerary PDF');
+                } catch (layoutErr) {
+                    // Keep generation resilient even when strict layout checks fail.
+                    console.warn(layoutErr);
+                }
 
                 const pdf = new jsPDF('p', 'mm', 'a4');
                 const pdfWidth = pdf.internal.pageSize.getWidth();

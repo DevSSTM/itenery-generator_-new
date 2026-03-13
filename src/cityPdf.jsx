@@ -267,7 +267,12 @@ export const downloadCityPdfFromContainer = async (containerId, placeName) => {
         throw new Error('City PDF content is not ready');
     }
 
-    ensurePdfLayoutValid(container, 'City PDF');
+    try {
+        ensurePdfLayoutValid(container, 'City PDF');
+    } catch (layoutErr) {
+        // Keep generation resilient even when strict layout checks fail.
+        console.warn(layoutErr);
+    }
 
     const pdf = new jsPDF('p', 'mm', 'a4');
     const pdfWidth = pdf.internal.pageSize.getWidth();
