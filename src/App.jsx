@@ -187,7 +187,6 @@ function App() {
     const [showCityPreview, setShowCityPreview] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
     const [isGeneratingCityPdf, setIsGeneratingCityPdf] = useState(false);
-    const [isRepairingSubPlaces, setIsRepairingSubPlaces] = useState(false);
     const [systemPopup, setSystemPopup] = useState({
         open: false,
         title: '',
@@ -902,112 +901,6 @@ function App() {
         }
     };
 
-    const handleRepairAllSubPlaceDescriptions = async () => {
-        if (!isAdmin) {
-            showSystemPopup({
-                title: 'Permission Required',
-                message: 'Only admin can repair sub-place descriptions.',
-                tone: 'warning',
-            });
-            return;
-        }
-        if (isRepairingSubPlaces) return;
-
-        setIsRepairingSubPlaces(true);
-        try {
-            let backupMap = {};
-            try {
-                const rawBackup = localStorage.getItem(SUB_PLACES_BACKUP_KEY) || '{}';
-                const parsed = JSON.parse(rawBackup);
-                if (parsed && typeof parsed === 'object') backupMap = parsed;
-            } catch (_err) {
-                backupMap = {};
-            }
-
-            const combinedPlaces = [...placesList, ...userPlaces];
-            const updates = [];
-            const mergedById = new Map();
-            const nextBackupMap = { ...backupMap };
-
-            combinedPlaces.forEach((place) => {
-                const seedPlace = places.find((p) => p.id === place.id);
-                const merged = mergeSubPlacesByName(
-                    place.subPlaces,
-                    backupMap[place.id],
-                    seedPlace?.subPlaces,
-                );
-                if (merged.length === 0) return;
-
-                nextBackupMap[place.id] = merged;
-                mergedById.set(place.id, merged);
-                const current = normalizeSubPlaces(place.subPlaces);
-                if (JSON.stringify(current) !== JSON.stringify(merged)) {
-                    updates.push({ id: place.id, sub_places: merged });
-                }
-            });
-
-            if (updates.length > 0) {
-                await Promise.all(
-                    updates.map(async (row) => {
-                        const { error } = await supabase
-                            .from('destinations')
-                            .update({ sub_places: row.sub_places })
-                            .eq('id', row.id);
-                        if (error) throw error;
-                    }),
-                );
-            }
-
-            setPlacesList((prev) => prev.map((p) => {
-                const merged = mergedById.get(p.id);
-                return merged ? { ...p, subPlaces: merged } : p;
-            }));
-            setUserPlaces((prev) => prev.map((p) => {
-                const merged = mergedById.get(p.id);
-                return merged ? { ...p, subPlaces: merged } : p;
-            }));
-            setItinerary((prev) => {
-                const next = { ...prev };
-                Object.keys(next).forEach((day) => {
-                    next[day] = (next[day] || []).map((item) => {
-                        const merged = mergedById.get(item.id || item.cityId);
-                        if (!merged) return item;
-                        return {
-                            ...item,
-                            subPlaces: merged,
-                            selectedSubPlaces: hydrateSelectedSubPlaces(item.selectedSubPlaces, merged),
-                        };
-                    });
-                });
-                return next;
-            });
-
-            try {
-                localStorage.setItem(SUB_PLACES_BACKUP_KEY, JSON.stringify(nextBackupMap));
-            } catch (_err) {
-                // Ignore localStorage errors.
-            }
-
-            showSystemPopup({
-                title: 'Repair Completed',
-                message: updates.length > 0
-                    ? `Restored sub-place descriptions for ${updates.length} destination(s).`
-                    : 'Descriptions were already complete. No updates needed.',
-                tone: 'warning',
-            });
-        } catch (error) {
-            console.error('Failed to repair sub-place descriptions', error);
-            showSystemPopup({
-                title: 'Repair Failed',
-                message: 'Could not repair all sub-place descriptions right now.',
-                details: error?.message || '',
-                tone: 'error',
-            });
-        } finally {
-            setIsRepairingSubPlaces(false);
-        }
-    };
-
     const currentGallery = editingPlaceId ? (placesGallery[editingPlaceId] || []) : [];
 
     const allPlaces = [...placesList, ...userPlaces];
@@ -1653,17 +1546,6 @@ function App() {
                         <span style={{ marginLeft: '12px', fontSize: '0.82rem', color: '#475569' }}>
                             {sessionRole === 'admin' ? 'Role: Admin' : 'Role: User'}
                         </span>
-                        {isAdmin && (
-                            <button
-                                className="btn btn-outline btn-sm"
-                                type="button"
-                                style={{ width: 'auto', marginTop: 0, marginLeft: '10px', padding: '6px 10px' }}
-                                onClick={handleRepairAllSubPlaceDescriptions}
-                                disabled={isRepairingSubPlaces}
-                            >
-                                {isRepairingSubPlaces ? 'Repairing...' : 'Repair Sub-Places'}
-                            </button>
-                        )}
                         <button
                             className="btn btn-outline btn-sm"
                             type="button"
