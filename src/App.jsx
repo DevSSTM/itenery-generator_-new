@@ -796,8 +796,8 @@ function App() {
         const planner = new TypeScriptPdfLayoutEngine({
             page: { width: 210, height: 297 },
             margins: { top: 5, right: 5, bottom: 5, left: 5 },
-            headerHeightMm: 55, // Increased from 52 to match 210px CSS zone
-            footerHeightMm: 22.5, // Increased from 20 to match 84px CSS zone
+            headerHeightMm: 52,
+            footerHeightMm: 20,
             blockGapMm: ENTRY_GAP_MM,
             footerVisibility: 'last-and-single',
         });
@@ -1549,24 +1549,28 @@ function App() {
 
                                     <div className="builder-content">
                                         <div className="builder-card">
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px', flexWrap: 'wrap', gap: '20px' }}>
-                                                <h2 style={{ fontSize: '1.5rem', fontWeight: '800', color: 'var(--primary)', margin: 0, letterSpacing: '-0.5px' }}>Day {activeDay} Destinations</h2>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px', flexWrap: 'wrap', gap: '15px' }}>
+                                                <h2 style={{ fontSize: '1.4rem', color: 'var(--primary)', margin: 0 }}>Day {activeDay} Destinations</h2>
                                                 
-                                                <div className="day-controls-bar">
-                                                    <button 
-                                                        className={`day-control-btn ${showDayNote[activeDay] ? 'active' : ''}`}
+                                                <div style={{ display: 'flex', gap: '12px' }}>
+                                                    <div 
+                                                        className="premium-switch-container"
                                                         onClick={() => {
                                                             const checked = !showDayNote[activeDay];
                                                             setShowDayNote(prev => ({ ...prev, [activeDay]: checked }));
                                                             if (!checked) setDayNoteText(prev => ({ ...prev, [activeDay]: '' }));
                                                         }}
                                                     >
-                                                        <Cloud size={16} />
-                                                        <span>Day Highlights</span>
-                                                    </button>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={showDayNote[activeDay] || false}
+                                                            onChange={() => {}} 
+                                                        />
+                                                        <span className="premium-switch-text">Day Highlights</span>
+                                                    </div>
 
-                                                    <button 
-                                                        className={`day-control-btn ${showCityNote[activeDay] ? 'active' : ''}`}
+                                                    <div 
+                                                        className="premium-switch-container"
                                                         onClick={() => {
                                                             const checked = !showCityNote[activeDay];
                                                             setShowCityNote(prev => ({ ...prev, [activeDay]: checked }));
@@ -1575,11 +1579,16 @@ function App() {
                                                             }
                                                         }}
                                                     >
-                                                        <MapPin size={16} />
-                                                        <span>City Tips</span>
-                                                    </button>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={showCityNote[activeDay] || false}
+                                                            onChange={() => {}}
+                                                        />
+                                                        <span className="premium-switch-text">City Tips</span>
+                                                    </div>
                                                 </div>
                                             </div>
+
 
                                             <AnimatePresence>
                                                 {showDayNote[activeDay] && (
