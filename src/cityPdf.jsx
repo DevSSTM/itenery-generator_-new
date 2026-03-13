@@ -61,6 +61,7 @@ const paginateCityFlow = (flowItems) => {
         headerHeightMm: 52,
         footerHeightMm: 20,
         blockGapMm: 2,
+        footerVisibility: 'last-and-single',
     });
 
     const blocks = flowItems.map((item, index) => ({
@@ -150,7 +151,6 @@ export const CityPDFContent = ({ place }) => {
     return (
         <div className="pdf-preview-container">
             {pages.map((pageItems, pageIndex) => {
-                const isLastPage = pageIndex === pages.length - 1;
                 const headItem = pageItems.find(item => item.type === 'city-head');
                 const paragraphs = pageItems.filter(item => item.type === 'city-para').map(item => item.text);
                 const points = pageItems.filter(item => item.type === 'city-point');
@@ -232,7 +232,7 @@ export const CityPDFContent = ({ place }) => {
                                 </div>
                             </div>
 
-                            {isLastPage && (
+                            {pageIndex === pages.length - 1 && (
                                 <div className="pdf-fixed-footer" data-pdf-role="footer">
                                     <CityPdfFooter />
                                 </div>
