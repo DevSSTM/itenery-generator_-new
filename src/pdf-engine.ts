@@ -45,6 +45,7 @@ export interface PlannedPage {
     role: PageRole;
     showHeader: boolean;
     showFooter: boolean;
+    footerExceptionApplied?: boolean;
     bodyCapacityMm: number;
     usedBodyMm: number;
     freeBodyMm: number;
@@ -72,6 +73,17 @@ export interface RenderCandidate {
 }
 
 const EPSILON = 0.0001;
+const PDF_LAYOUT_DEBUG = (() => {
+    const envDebug = typeof import.meta !== 'undefined'
+        && Boolean((import.meta as unknown as { env?: Record<string, string> }).env?.VITE_PDF_LAYOUT_DEBUG === '1');
+    if (envDebug) return true;
+    if (typeof window === 'undefined') return false;
+    try {
+        return window.localStorage.getItem('pdfLayoutDebug') === '1';
+    } catch {
+        return false;
+    }
+})();
 
 const sumHeights = (blocks: PlacedBlock[], gap: number): number => {
     if (blocks.length === 0) return 0;
@@ -130,7 +142,7 @@ export class TypeScriptPdfLayoutEngine {
             if (p.freeBodyMm < -EPSILON) errors.push(`Page ${index + 1}: negative free space`);
 
             const expectedHeader = this.expectedHeaderForPosition(index, plan.pages.length);
-            const expectedFooter = this.expectedFooterForPosition(index, plan.pages.length);
+            const expectedFooter = this.expectedFooterForPosition(index, plan.pages.length, p);
             if (p.showHeader !== expectedHeader) errors.push(`Page ${index + 1}: header placement rule failed`);
             if (p.showFooter !== expectedFooter) errors.push(`Page ${index + 1}: footer placement rule failed`);
 
@@ -187,6 +199,7 @@ export class TypeScriptPdfLayoutEngine {
             role,
             showHeader: this.showHeaderForRole(role),
             showFooter: this.showFooterForRole(role),
+            footerExceptionApplied: false,
             bodyCapacityMm: bodyCapacity,
         });
     }
@@ -213,8 +226,19 @@ export class TypeScriptPdfLayoutEngine {
 
     private adjustForLastFooter(pages: PlannedPage[]): PlannedPage[] {
         if (pages.length === 1) {
-            const single = this.createEmptyPage(1, 'single');
             const blocks = [...pages[0].blocks];
+            const usedMm = sumHeights(blocks, this.template.blockGapMm);
+
+            if (this.canUseSinglePageFooterException(usedMm)) {
+                this.debug('Applying single-page footer exception', {
+                    usedMm: Number(usedMm.toFixed(2)),
+                    capacityWithFooterMm: Number(this.bodyCapacityForSingle(true).toFixed(2)),
+                    capacityWithoutFooterMm: Number(this.bodyCapacityForSingle(false).toFixed(2)),
+                });
+                return [this.buildSinglePage(blocks, false)];
+            }
+
+            const single = this.createEmptyPage(1, 'single');
             const packed = this.repackBlocksIntoPages(blocks, ['single']);
             return packed.length > 0 ? packed : [single];
         }
@@ -268,11 +292,14 @@ export class TypeScriptPdfLayoutEngine {
     private finalizeRoles(pages: PlannedPage[]): PlannedPage[] {
         if (pages.length === 1) {
             const single = pages[0];
+            const usedMm = sumHeights(single.blocks, this.template.blockGapMm);
+            const omitFooter = this.canUseSinglePageFooterException(usedMm);
             single.role = 'single';
             single.showHeader = this.showHeaderForRole('single');
-            single.showFooter = this.showFooterForRole('single');
-            single.bodyCapacityMm = this.bodyCapacityForRole('single');
-            single.usedBodyMm = sumHeights(single.blocks, this.template.blockGapMm);
+            single.showFooter = omitFooter ? false : this.showFooterForRole('single');
+            single.footerExceptionApplied = omitFooter;
+            single.bodyCapacityMm = this.bodyCapacityForSingle(single.showFooter);
+            single.usedBodyMm = usedMm;
             single.freeBodyMm = single.bodyCapacityMm - single.usedBodyMm;
             return pages;
         }
@@ -286,6 +313,7 @@ export class TypeScriptPdfLayoutEngine {
                 role,
                 showHeader: this.showHeaderForRole(role),
                 showFooter: this.showFooterForRole(role),
+                footerExceptionApplied: false,
                 bodyCapacityMm: capacity,
                 usedBodyMm: used,
                 freeBodyMm: capacity - used,
@@ -318,6 +346,13 @@ export class TypeScriptPdfLayoutEngine {
         return printableHeight - header - footer;
     }
 
+    private bodyCapacityForSingle(showFooter: boolean): number {
+        const printableHeight = this.template.page.height - this.template.margins.top - this.template.margins.bottom;
+        const header = this.showHeaderForRole('single') ? this.template.headerHeightMm : 0;
+        const footer = showFooter ? this.template.footerHeightMm : 0;
+        return printableHeight - header - footer;
+    }
+
     private showHeaderForRole(role: PageRole): boolean {
         const mode = this.template.headerVisibility ?? 'first-and-single';
         if (mode === 'none') return false;
@@ -339,11 +374,47 @@ export class TypeScriptPdfLayoutEngine {
         return totalPages === 1 || pageIndex === 0;
     }
 
-    private expectedFooterForPosition(pageIndex: number, totalPages: number): boolean {
+    private expectedFooterForPosition(pageIndex: number, totalPages: number, page?: PlannedPage): boolean {
         const mode = this.template.footerVisibility ?? 'last-and-single';
         if (mode === 'none') return false;
         if (mode === 'every-page') return true;
-        return totalPages === 1 || pageIndex === totalPages - 1;
+        if (totalPages === 1) {
+            if (page && this.canUseSinglePageFooterException(page.usedBodyMm)) return false;
+            return true;
+        }
+        return pageIndex === totalPages - 1;
+    }
+
+    private canUseSinglePageFooterException(usedMm: number): boolean {
+        if (!this.showFooterForRole('single')) return false;
+        const withFooter = this.bodyCapacityForSingle(true);
+        const withoutFooter = this.bodyCapacityForSingle(false);
+        return usedMm > withFooter + EPSILON && usedMm <= withoutFooter + EPSILON;
+    }
+
+    private buildSinglePage(blocks: PlacedBlock[], showFooter: boolean): PlannedPage {
+        const bodyCapacityMm = this.bodyCapacityForSingle(showFooter);
+        const usedBodyMm = sumHeights(blocks, this.template.blockGapMm);
+        return {
+            pageNumber: 1,
+            role: 'single',
+            showHeader: this.showHeaderForRole('single'),
+            showFooter,
+            footerExceptionApplied: !showFooter,
+            bodyCapacityMm,
+            usedBodyMm,
+            freeBodyMm: bodyCapacityMm - usedBodyMm,
+            blocks: [...blocks],
+        };
+    }
+
+    private debug(message: string, details?: Record<string, unknown>): void {
+        if (!PDF_LAYOUT_DEBUG) return;
+        if (details) {
+            console.debug(`[pdf-layout] ${message}`, details);
+            return;
+        }
+        console.debug(`[pdf-layout] ${message}`);
     }
 }
 

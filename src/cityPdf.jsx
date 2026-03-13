@@ -6,8 +6,11 @@ import { TypeScriptPdfLayoutEngine } from './pdf-engine';
 
 export const CITY_PDF_CONTAINER_ID = 'hidden-city-pdf-content';
 
-const CityPdfPage = ({ children }) => (
-    <div className="pdf-page">
+const CityPdfPage = ({ children, footerExceptionApplied = false }) => (
+    <div
+        className="pdf-page"
+        data-footer-exception={footerExceptionApplied ? 'single-fit' : 'none'}
+    >
         <div className="pdf-page-border"></div>
         <div className="pdf-page-content">
             <div className="pdf-page-inner">
@@ -50,7 +53,11 @@ const paginateCityFlow = (flowItems) => {
     const getItemWeight = (item) => {
         if (item.type === 'city-head') return item.image2 ? 2.2 : 1.9;
         if (item.type === 'city-para') return Math.max(0.1, (item.text || '').length / 900);
-        if (item.type === 'city-point') return item.subDesc ? 0.26 : 0.18;
+        if (item.type === 'city-point') {
+            const pointLen = `${item.subName || ''} ${item.subDesc || ''}`.trim().length;
+            const estimatedLines = Math.max(1, Math.ceil(pointLen / 70));
+            return Math.max(0.34, 0.2 + (pointLen / 560) + (estimatedLines * 0.06));
+        }
         return 0.2;
     };
 
@@ -76,10 +83,10 @@ const paginateCityFlow = (flowItems) => {
     try {
         plan = planner.layout(blocks);
     } catch (_err) {
-        return [{ items: flowItems, showHeader: true, showFooter: true }];
+        return [{ items: flowItems, showHeader: true, showFooter: true, footerExceptionApplied: false }];
     }
     if (!plan.valid) {
-        return [{ items: flowItems, showHeader: true, showFooter: true }];
+        return [{ items: flowItems, showHeader: true, showFooter: true, footerExceptionApplied: false }];
     }
 
     const itemById = new Map(flowItems.map((item, idx) => [`city-${idx}`, item]));
@@ -89,9 +96,10 @@ const paginateCityFlow = (flowItems) => {
             .filter(Boolean),
         showHeader: page.showHeader,
         showFooter: page.showFooter,
+        footerExceptionApplied: Boolean(page.footerExceptionApplied),
     }));
 
-    return pages.length > 0 ? pages : [{ items: [], showHeader: true, showFooter: true }];
+    return pages.length > 0 ? pages : [{ items: [], showHeader: true, showFooter: true, footerExceptionApplied: false }];
 };
 
 const CityPdfHeader = () => (
@@ -162,6 +170,7 @@ export const CityPDFContent = ({ place }) => {
                 const shouldRenderFooter = typeof pageData?.showFooter === 'boolean'
                     ? pageData.showFooter
                     : pageIndex === pages.length - 1;
+                const footerExceptionApplied = Boolean(pageData?.footerExceptionApplied);
                 const headItem = pageItems.find(item => item.type === 'city-head');
                 const paragraphs = pageItems.filter(item => item.type === 'city-para').map(item => item.text);
                 const points = pageItems.filter(item => item.type === 'city-point');
@@ -169,7 +178,7 @@ export const CityPDFContent = ({ place }) => {
 
                 return (
                     <div key={`city-page-${pageIndex}`}>
-                        <CityPdfPage>
+                        <CityPdfPage footerExceptionApplied={footerExceptionApplied}>
                             {shouldRenderHeader && (
                                 <div className="pdf-fixed-header city-pdf-fixed-header" data-pdf-role="header">
                                     <CityPdfHeader />
@@ -267,12 +276,7 @@ export const downloadCityPdfFromContainer = async (containerId, placeName) => {
         throw new Error('City PDF content is not ready');
     }
 
-    try {
-        ensurePdfLayoutValid(container, 'City PDF');
-    } catch (layoutErr) {
-        // Keep generation resilient even when strict layout checks fail.
-        console.warn(layoutErr);
-    }
+    ensurePdfLayoutValid(container, 'City PDF');
 
     const pdf = new jsPDF('p', 'mm', 'a4');
     const pdfWidth = pdf.internal.pageSize.getWidth();

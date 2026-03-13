@@ -777,14 +777,17 @@ function App() {
                 const subName = typeof sub === 'string' ? sub : (sub?.name || '');
                 const subDesc = typeof sub === 'string' ? '' : (sub?.description || '');
                 const pointLen = (subName + ' ' + subDesc).trim().length;
-                weight = Math.max(0.2, 0.12 + (pointLen / 620));
+                const estimatedLines = Math.max(1, Math.ceil(pointLen / 70));
+                weight = Math.max(0.36, 0.2 + (pointLen / 520) + (estimatedLines * 0.09));
             } else if (item.type === 'city-note-point') {
                 const noteLen = (item.text || '').trim().length;
                 // First city-note line also carries the visual box title/container overhead.
                 if (item.isFirst) {
-                    weight = Math.max(0.42, 0.28 + (noteLen / 520));
+                    const estimatedLines = Math.max(1, Math.ceil(noteLen / 72));
+                    weight = Math.max(0.55, 0.34 + (noteLen / 460) + (estimatedLines * 0.08));
                 } else {
-                    weight = Math.max(0.22, 0.14 + (noteLen / 620));
+                    const estimatedLines = Math.max(1, Math.ceil(noteLen / 72));
+                    weight = Math.max(0.32, 0.2 + (noteLen / 560) + (estimatedLines * 0.05));
                 }
             }
             return weight;
@@ -810,7 +813,7 @@ function App() {
                 current.type === 'dest-head'
                 && next
                 && next.destId === current.destId
-                && (next.type === 'dest-para' || next.type === 'dest-highlight-point' || next.type === 'city-note-point');
+                && next.type === 'dest-para';
 
             if (canPairHead) {
                 const pairWeight = getItemWeight(current) + getItemWeight(next);
@@ -851,10 +854,10 @@ function App() {
         try {
             plan = planner.layout(blocks);
         } catch (_err) {
-            return [{ items: flowItems, showHeader: true, showFooter: true }];
+            return [{ items: flowItems, showHeader: true, showFooter: true, footerExceptionApplied: false }];
         }
         if (!plan.valid) {
-            return [{ items: flowItems, showHeader: true, showFooter: true }];
+            return [{ items: flowItems, showHeader: true, showFooter: true, footerExceptionApplied: false }];
         }
 
         const entryById = new Map(entries.map((entry) => [entry.id, entry]));
@@ -873,10 +876,11 @@ function App() {
                 items: pageItems,
                 showHeader: page.showHeader,
                 showFooter: page.showFooter,
+                footerExceptionApplied: Boolean(page.footerExceptionApplied),
             };
         });
 
-        return pages.length > 0 ? pages : [{ items: [], showHeader: true, showFooter: true }];
+        return pages.length > 0 ? pages : [{ items: [], showHeader: true, showFooter: true, footerExceptionApplied: false }];
     };
 
     const pagesData = paginatePlaces();
@@ -914,12 +918,7 @@ function App() {
                     return;
                 }
 
-                try {
-                    ensurePdfLayoutValid(container, 'Itinerary PDF');
-                } catch (layoutErr) {
-                    // Keep generation resilient even when strict layout checks fail.
-                    console.warn(layoutErr);
-                }
+                ensurePdfLayoutValid(container, 'Itinerary PDF');
 
                 const pdf = new jsPDF('p', 'mm', 'a4');
                 const pdfWidth = pdf.internal.pageSize.getWidth();
@@ -2528,8 +2527,11 @@ function App() {
     );
 }
 
-const PDFPage = ({ children, pageNumber, totalPages, generationTime }) => (
-    <div className="pdf-page">
+const PDFPage = ({ children, pageNumber, totalPages, generationTime, footerExceptionApplied = false }) => (
+    <div
+        className="pdf-page"
+        data-footer-exception={footerExceptionApplied ? 'single-fit' : 'none'}
+    >
         <div className="pdf-page-border"></div>
         {generationTime && (
             <div style={{
@@ -2603,6 +2605,7 @@ const PDFContent = ({
                 const shouldRenderFooter = typeof pageData?.showFooter === 'boolean'
                     ? pageData.showFooter
                     : pageIndex === pages.length - 1;
+                const footerExceptionApplied = Boolean(pageData?.footerExceptionApplied);
 
                 return (
                 <div key={pageIndex}>
@@ -2610,6 +2613,7 @@ const PDFContent = ({
                         pageNumber={pageIndex + 1}
                         totalPages={pages.length}
                         generationTime={generationTime}
+                        footerExceptionApplied={footerExceptionApplied}
                     >
                         {shouldRenderHeader && (
                             <div className="pdf-fixed-header" data-pdf-role="header">
