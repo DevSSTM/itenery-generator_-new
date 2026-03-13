@@ -107,6 +107,47 @@ const normalizeSubPlaces = (rawSubPlaces) => {
     return deduped;
 };
 
+const mergeSubPlacesByName = (...lists) => {
+    const merged = [];
+    const byKey = new Map();
+
+    lists.forEach((list) => {
+        const normalized = normalizeSubPlaces(list);
+        normalized.forEach((item) => {
+            const key = item.name.toLowerCase();
+            const existing = byKey.get(key);
+            if (!existing) {
+                const next = { name: item.name, description: item.description || '' };
+                byKey.set(key, next);
+                merged.push(next);
+                return;
+            }
+            if (!existing.description && item.description) {
+                existing.description = item.description;
+            }
+        });
+    });
+
+    return merged;
+};
+
+const hydrateSelectedSubPlaces = (selectedSubPlaces, masterSubPlaces) => {
+    const master = normalizeSubPlaces(masterSubPlaces);
+    const masterMap = new Map(master.map((sp) => [sp.name.toLowerCase(), sp]));
+    return (Array.isArray(selectedSubPlaces) ? selectedSubPlaces : [])
+        .map((sub) => {
+            const name = getSubPlaceName(sub);
+            if (!name) return null;
+            const fromMaster = masterMap.get(name.toLowerCase());
+            if (fromMaster) return { ...fromMaster };
+            const description = typeof sub === 'string'
+                ? ''
+                : (typeof sub?.description === 'string' ? sub.description.trim() : '');
+            return { name, description };
+        })
+        .filter(Boolean);
+};
+
 function App() {
     const [numDays, setNumDays] = useState(1);
     const [activeDay, setActiveDay] = useState(1);
@@ -127,6 +168,7 @@ function App() {
     const [showCityPreview, setShowCityPreview] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
     const [isGeneratingCityPdf, setIsGeneratingCityPdf] = useState(false);
+    const [isRepairingSubPlaces, setIsRepairingSubPlaces] = useState(false);
     const [systemPopup, setSystemPopup] = useState({
         open: false,
         title: '',
@@ -254,9 +296,11 @@ function App() {
                         const dbSubPlaces = normalizeSubPlaces(dbPlace.sub_places);
                         const backupSubPlaces = normalizeSubPlaces(backupMap[dbPlace.id]);
                         const seedSubPlaces = normalizeSubPlaces(seedPlace?.subPlaces);
-                        const resolvedSubPlaces = dbSubPlaces.length > 0
-                            ? dbSubPlaces
-                            : (backupSubPlaces.length > 0 ? backupSubPlaces : seedSubPlaces);
+                        const resolvedSubPlaces = mergeSubPlacesByName(
+                            dbSubPlaces,
+                            backupSubPlaces,
+                            seedSubPlaces,
+                        );
 
                         const formattedPlace = {
                             ...dbPlace,
@@ -267,7 +311,10 @@ function App() {
                         if (resolvedSubPlaces.length > 0) {
                             nextBackupMap[dbPlace.id] = resolvedSubPlaces;
                         }
-                        if (dbSubPlaces.length === 0 && resolvedSubPlaces.length > 0) {
+                        const dbNeedsRestore =
+                            resolvedSubPlaces.length > 0
+                            && JSON.stringify(dbSubPlaces) !== JSON.stringify(resolvedSubPlaces);
+                        if (dbNeedsRestore) {
                             restoreQueue.push({ id: dbPlace.id, sub_places: resolvedSubPlaces });
                         }
 
@@ -788,6 +835,112 @@ function App() {
         }
     };
 
+    const handleRepairAllSubPlaceDescriptions = async () => {
+        if (!isAdmin) {
+            showSystemPopup({
+                title: 'Permission Required',
+                message: 'Only admin can repair sub-place descriptions.',
+                tone: 'warning',
+            });
+            return;
+        }
+        if (isRepairingSubPlaces) return;
+
+        setIsRepairingSubPlaces(true);
+        try {
+            let backupMap = {};
+            try {
+                const rawBackup = localStorage.getItem(SUB_PLACES_BACKUP_KEY) || '{}';
+                const parsed = JSON.parse(rawBackup);
+                if (parsed && typeof parsed === 'object') backupMap = parsed;
+            } catch (_err) {
+                backupMap = {};
+            }
+
+            const combinedPlaces = [...placesList, ...userPlaces];
+            const updates = [];
+            const mergedById = new Map();
+            const nextBackupMap = { ...backupMap };
+
+            combinedPlaces.forEach((place) => {
+                const seedPlace = places.find((p) => p.id === place.id);
+                const merged = mergeSubPlacesByName(
+                    place.subPlaces,
+                    backupMap[place.id],
+                    seedPlace?.subPlaces,
+                );
+                if (merged.length === 0) return;
+
+                nextBackupMap[place.id] = merged;
+                mergedById.set(place.id, merged);
+                const current = normalizeSubPlaces(place.subPlaces);
+                if (JSON.stringify(current) !== JSON.stringify(merged)) {
+                    updates.push({ id: place.id, sub_places: merged });
+                }
+            });
+
+            if (updates.length > 0) {
+                await Promise.all(
+                    updates.map(async (row) => {
+                        const { error } = await supabase
+                            .from('destinations')
+                            .update({ sub_places: row.sub_places })
+                            .eq('id', row.id);
+                        if (error) throw error;
+                    }),
+                );
+            }
+
+            setPlacesList((prev) => prev.map((p) => {
+                const merged = mergedById.get(p.id);
+                return merged ? { ...p, subPlaces: merged } : p;
+            }));
+            setUserPlaces((prev) => prev.map((p) => {
+                const merged = mergedById.get(p.id);
+                return merged ? { ...p, subPlaces: merged } : p;
+            }));
+            setItinerary((prev) => {
+                const next = { ...prev };
+                Object.keys(next).forEach((day) => {
+                    next[day] = (next[day] || []).map((item) => {
+                        const merged = mergedById.get(item.id || item.cityId);
+                        if (!merged) return item;
+                        return {
+                            ...item,
+                            subPlaces: merged,
+                            selectedSubPlaces: hydrateSelectedSubPlaces(item.selectedSubPlaces, merged),
+                        };
+                    });
+                });
+                return next;
+            });
+
+            try {
+                localStorage.setItem(SUB_PLACES_BACKUP_KEY, JSON.stringify(nextBackupMap));
+            } catch (_err) {
+                // Ignore localStorage errors.
+            }
+
+            showSystemPopup({
+                title: 'Repair Completed',
+                message: updates.length > 0
+                    ? `Restored sub-place descriptions for ${updates.length} destination(s).`
+                    : 'Descriptions were already complete. No updates needed.',
+                tone: 'warning',
+            });
+        } catch (error) {
+            console.error('Failed to repair sub-place descriptions', error);
+            showSystemPopup({
+                title: 'Repair Failed',
+                message: 'Could not repair all sub-place descriptions right now.',
+                details: error?.message || '',
+                tone: 'error',
+            });
+        } finally {
+            setIsRepairingSubPlaces(false);
+        }
+    };
+
     const currentGallery = editingPlaceId ? (placesGallery[editingPlaceId] || []) : [];
 
     const allPlaces = [...placesList, ...userPlaces];
@@ -803,6 +956,9 @@ function App() {
         for (let d = 1; d <= numDays; d++) {
             const dayPlaces = itinerary[d] || [];
             dayPlaces.forEach(item => {
+                const placeMaster = allPlaces.find((p) => p.id === (item.id || item.cityId));
+                const mergedCitySubPlaces = mergeSubPlacesByName(item.subPlaces, placeMaster?.subPlaces);
+                const enrichedSelectedSubPlaces = hydrateSelectedSubPlaces(item.selectedSubPlaces, mergedCitySubPlaces);
                 // We split into Head (Header+Images) and Content (Description+Highlights)
                 // This allows a city's text to wrap to the next page while keeping images on the first page
                 flowItems.push({
@@ -823,13 +979,13 @@ function App() {
                     });
                 });
 
-                if (item.selectedSubPlaces && item.selectedSubPlaces.length > 0) {
-                    item.selectedSubPlaces.forEach((sub, subIdx) => {
+                if (enrichedSelectedSubPlaces.length > 0) {
+                    enrichedSelectedSubPlaces.forEach((sub, subIdx) => {
                         flowItems.push({
                             type: 'dest-highlight-point',
                             highlight: sub,
                             isFirst: subIdx === 0,
-                            isLast: subIdx === item.selectedSubPlaces.length - 1,
+                            isLast: subIdx === enrichedSelectedSubPlaces.length - 1,
                             day: d,
                             destId: item.id,
                             name: item.name
@@ -867,10 +1023,10 @@ function App() {
                 const linesRaw = (item.text || '').split('\n').filter(l => l.trim());
                 weight = 0.42 + (linesRaw.length * 0.16);
             } else if (item.type === 'dest-head') {
-                weight = 1.2;
-                if (item.image2) weight += 0.25;
+                weight = 1.0;
+                if (item.image2) weight += 0.2;
             } else if (item.type === 'dest-para') {
-                weight = Math.max(0.07, (item.text || '').length / 980);
+                weight = Math.max(0.06, (item.text || '').length / 1200);
             } else if (item.type === 'dest-highlight-point') {
                 const sub = item.highlight;
                 const subName = typeof sub === 'string' ? sub : (sub?.name || '');
@@ -892,9 +1048,9 @@ function App() {
             return weight;
         };
 
-        const MM_PER_WEIGHT = 54;
-        const FIRST_PAGE_WELCOME_RESERVE_MM = 34;
-        const ENTRY_GAP_MM = 2.5;
+        const MM_PER_WEIGHT = 46;
+        const FIRST_PAGE_WELCOME_RESERVE_MM = 20;
+        const ENTRY_GAP_MM = 2;
         const planner = new TypeScriptPdfLayoutEngine({
             page: { width: 210, height: 297 },
             margins: { top: 5, right: 5, bottom: 8, left: 5 },
@@ -905,9 +1061,26 @@ function App() {
         });
 
         const entries = [];
+        const subPlacesPageBreakByCity = new Set();
         for (let i = 0; i < flowItems.length; i++) {
             const current = flowItems[i];
             const next = flowItems[i + 1];
+            const cityKey = `${current?.day ?? ''}-${current?.destId ?? ''}`;
+            const startsSubPlacesArea =
+                (current?.type === 'dest-highlight-point' || current?.type === 'city-note-point')
+                && !subPlacesPageBreakByCity.has(cityKey);
+
+            if (startsSubPlacesArea) {
+                entries.push({
+                    id: `entry-break-${i}`,
+                    itemIndexes: [],
+                    heightMm: 0,
+                    keepTogether: true,
+                    forcePageBreak: true,
+                });
+                subPlacesPageBreakByCity.add(cityKey);
+            }
+
             const canPairHead =
                 current.type === 'dest-head'
                 && next
@@ -944,6 +1117,7 @@ function App() {
             ...entries.map((entry) => ({
                 id: entry.id,
                 heightMm: entry.heightMm,
+                forcePageBreak: entry.forcePageBreak === true,
                 keepTogether: entry.keepTogether,
                 splittable: false,
             })),
@@ -1412,6 +1586,17 @@ function App() {
                         <span style={{ marginLeft: '12px', fontSize: '0.82rem', color: '#475569' }}>
                             {sessionRole === 'admin' ? 'Role: Admin' : 'Role: User'}
                         </span>
+                        {isAdmin && (
+                            <button
+                                className="btn btn-outline btn-sm"
+                                type="button"
+                                style={{ width: 'auto', marginTop: 0, marginLeft: '10px', padding: '6px 10px' }}
+                                onClick={handleRepairAllSubPlaceDescriptions}
+                                disabled={isRepairingSubPlaces}
+                            >
+                                {isRepairingSubPlaces ? 'Repairing...' : 'Repair Sub-Places'}
+                            </button>
+                        )}
                         <button
                             className="btn btn-outline btn-sm"
                             type="button"
@@ -1908,9 +2093,7 @@ function App() {
                                                 const place = allPlaces.find(p => p.id === (item.id || item.cityId));
                                                 if (!place) return null;
                                                 const placeSubPlaces = normalizeSubPlaces(
-                                                    (Array.isArray(item.subPlaces) && item.subPlaces.length > 0)
-                                                        ? item.subPlaces
-                                                        : place.subPlaces
+                                                    mergeSubPlacesByName(item.subPlaces, place.subPlaces)
                                                 );
 
                                                 return (
@@ -1975,7 +2158,7 @@ function App() {
                                                                         if (selectedIdx === "") return;
 
                                                                         const subToAdd = placeSubPlaces[selectedIdx];
-                                                                        const currentSelection = item.selectedSubPlaces || [];
+                                                                        const currentSelection = hydrateSelectedSubPlaces(item.selectedSubPlaces, placeSubPlaces);
 
                                                                         const subNameToAdd = typeof subToAdd === 'string' ? subToAdd : subToAdd.name;
                                                                         const exists = currentSelection.some(s => (typeof s === 'string' ? s : s.name) === subNameToAdd);
@@ -1996,9 +2179,9 @@ function App() {
                                                                     ))}
                                                                 </select>
 
-                                                                {item.selectedSubPlaces && item.selectedSubPlaces.length > 0 && (
+                                                                {hydrateSelectedSubPlaces(item.selectedSubPlaces, placeSubPlaces).length > 0 && (
                                                                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }}>
-                                                                        {item.selectedSubPlaces.map((sub, sIdx) => {
+                                                                        {hydrateSelectedSubPlaces(item.selectedSubPlaces, placeSubPlaces).map((sub, sIdx) => {
                                                                             const rawDisplayName = typeof sub === 'string' ? sub : sub.name;
                                                                             const displayName = rawDisplayName.charAt(0).toUpperCase() + rawDisplayName.slice(1).toLowerCase();
                                                                             const displayDesc = typeof sub === 'string' ? '' : sub.description;
@@ -2721,7 +2904,10 @@ const PDFPage = ({ children, pageNumber, totalPages, generationTime, footerExcep
     >
         <div className="pdf-page-border"></div>
         {generationTime && (
-            <div style={{
+            <div
+                className="pdf-generated-stamp"
+                data-pdf-role="generated-stamp"
+                style={{
                 position: 'absolute',
                 right: '10px',
                 top: '4px',
@@ -2731,7 +2917,8 @@ const PDFPage = ({ children, pageNumber, totalPages, generationTime, footerExcep
                 color: 'var(--text-light)',
                 whiteSpace: 'nowrap',
                 zIndex: 100
-            }}>
+                }}
+            >
                 Generated: {generationTime}
             </div>
         )}

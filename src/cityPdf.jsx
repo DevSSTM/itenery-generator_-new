@@ -51,20 +51,20 @@ const buildCityFlowItems = (place) => {
 
 const paginateCityFlow = (flowItems) => {
     const getItemWeight = (item) => {
-        if (item.type === 'city-head') return item.image2 ? 2.2 : 1.9;
-        if (item.type === 'city-para') return Math.max(0.1, (item.text || '').length / 900);
+        if (item.type === 'city-head') return item.image2 ? 2.0 : 1.75;
+        if (item.type === 'city-para') return Math.max(0.07, (item.text || '').length / 1250);
         if (item.type === 'city-point') {
             const pointLen = `${item.subName || ''} ${item.subDesc || ''}`.trim().length;
-            const estimatedLines = Math.max(1, Math.ceil(pointLen / 70));
-            return Math.max(0.34, 0.2 + (pointLen / 560) + (estimatedLines * 0.06));
+            const estimatedLines = Math.max(1, Math.ceil(pointLen / 96));
+            return Math.max(0.2, 0.12 + (pointLen / 860) + (estimatedLines * 0.03));
         }
         return 0.2;
     };
 
-    const MM_PER_WEIGHT = 48;
+    const MM_PER_WEIGHT = 38;
     const planner = new TypeScriptPdfLayoutEngine({
         page: { width: 210, height: 297 },
-        margins: { top: 5, right: 5, bottom: 5, left: 5 },
+        margins: { top: 5, right: 5, bottom: 2, left: 5 },
         headerHeightMm: 52,
         footerHeightMm: 20,
         blockGapMm: 2,
@@ -185,7 +185,7 @@ export const CityPDFContent = ({ place }) => {
                                 </div>
                             )}
 
-                            <div className="pdf-fixed-content" data-pdf-role="body">
+                            <div className="pdf-fixed-content city-pdf-fixed-content" data-pdf-role="body">
                                 <div className="pdf-day-item" style={{ marginBottom: '16px' }}>
                                     {pageIndex === 0 && (
                                         <div className="pdf-day-header" style={{ marginBottom: '10px', borderBottom: '2px solid #f8f8f8' }}>

@@ -661,6 +661,10 @@ header {
     max-height: 112px;
 }
 
+.city-pdf-fixed-content {
+    padding-bottom: 7.6px; /* ~2mm at A4 render scale */
+}
+
 /* Hard safety guards: keep all PDF content inside printable borders */
 .pdf-page *,
 .pdf-page *::before,

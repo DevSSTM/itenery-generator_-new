@@ -43,6 +43,7 @@ export const validatePdfLayout = (container) => {
         const header = page.querySelector('[data-pdf-role="header"]');
         const body = page.querySelector('[data-pdf-role="body"]');
         const footer = page.querySelector('[data-pdf-role="footer"]');
+        const generatedStamp = page.querySelector('[data-pdf-role="generated-stamp"]');
         const footerExceptionTag = page.getAttribute('data-footer-exception');
 
         if (!border) errors.push(`Page ${pageIndex + 1}: missing page border`);
@@ -81,6 +82,23 @@ export const validatePdfLayout = (container) => {
 
         if (!isInside(contentRect, borderRect)) {
             errors.push(`Page ${pageIndex + 1}: content area exceeds border area`);
+        }
+
+        if (generatedStamp) {
+            const stampRect = generatedStamp.getBoundingClientRect();
+            const stampInsidePage =
+                stampRect.left >= pageRect.left - PX_TOLERANCE
+                && stampRect.right <= pageRect.right + PX_TOLERANCE
+                && stampRect.top >= pageRect.top - PX_TOLERANCE
+                && stampRect.bottom <= pageRect.bottom + PX_TOLERANCE;
+            if (!stampInsidePage) {
+                errors.push(`Page ${pageIndex + 1}: generated stamp leaves page bounds`);
+            }
+
+            // Approved exception position: top strip above the printable border.
+            if (stampRect.bottom > borderRect.top + PX_TOLERANCE) {
+                errors.push(`Page ${pageIndex + 1}: generated stamp is outside approved position`);
+            }
         }
 
         if (header && body) {

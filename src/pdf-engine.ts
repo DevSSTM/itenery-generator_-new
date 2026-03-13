@@ -25,6 +25,7 @@ export interface PdfLayoutTemplate {
 export interface ContentBlock {
     id: string;
     heightMm: number;
+    forcePageBreak?: boolean;
     keepTogether?: boolean;
     splittable?: boolean;
     minSplitHeightMm?: number;
@@ -111,14 +112,14 @@ export class TypeScriptPdfLayoutEngine {
     constructor(private readonly template: PdfLayoutTemplate) {}
 
     layout(blocks: ContentBlock[]): LayoutPlan {
-        const sanitizedBlocks = blocks.filter((b) => b.heightMm > 0);
+        const sanitizedBlocks = blocks.filter((b) => b.forcePageBreak || b.heightMm > 0);
         if (sanitizedBlocks.length === 0) {
             const page = this.createEmptyPage(1, 'single');
             return this.validate({ pages: [page], errors: [], valid: true });
         }
 
         let pages = this.packAsFirstMiddle(sanitizedBlocks);
-        pages = this.adjustForLastFooter(pages);
+        pages = this.adjustForLastFooter(pages, sanitizedBlocks);
         pages = this.finalizeRoles(pages);
 
         return this.validate({ pages, errors: [], valid: true });
@@ -211,6 +212,14 @@ export class TypeScriptPdfLayoutEngine {
 
         for (const block of blocks) {
             page = pages[pages.length - 1];
+
+            if (block.forcePageBreak) {
+                if (page.blocks.length === 0) continue;
+                const next = this.createEmptyPage(pages.length + 1, 'middle');
+                pages.push(next);
+                continue;
+            }
+
             const placed = this.tryPlaceBlock(page, block);
             if (placed) continue;
 
@@ -224,10 +233,9 @@ export class TypeScriptPdfLayoutEngine {
         return pages;
     }
 
-    private adjustForLastFooter(pages: PlannedPage[]): PlannedPage[] {
+    private adjustForLastFooter(pages: PlannedPage[], sourceBlocks: ContentBlock[]): PlannedPage[] {
         if (pages.length === 1) {
-            const blocks = [...pages[0].blocks];
-            const usedMm = sumHeights(blocks, this.template.blockGapMm);
+            const usedMm = pages[0].usedBodyMm;
 
             if (this.canUseSinglePageFooterException(usedMm)) {
                 this.debug('Applying single-page footer exception', {
@@ -235,27 +243,18 @@ export class TypeScriptPdfLayoutEngine {
                     capacityWithFooterMm: Number(this.bodyCapacityForSingle(true).toFixed(2)),
                     capacityWithoutFooterMm: Number(this.bodyCapacityForSingle(false).toFixed(2)),
                 });
-                return [this.buildSinglePage(blocks, false)];
+                return [this.buildSinglePage(pages[0].blocks, false)];
             }
 
             const single = this.createEmptyPage(1, 'single');
-            const packed = this.repackBlocksIntoPages(blocks, ['single']);
+            const packed = this.repackBlocksIntoPages(sourceBlocks, ['single']);
             return packed.length > 0 ? packed : [single];
         }
 
-        const allBlocks = pages.flatMap((p) => p.blocks);
-        return this.repackBlocksIntoPages(allBlocks, ['first', 'middle', 'last']);
+        return this.repackBlocksIntoPages(sourceBlocks, ['first', 'middle', 'last']);
     }
 
-    private repackBlocksIntoPages(blocks: PlacedBlock[], roles: ('single' | 'first' | 'middle' | 'last')[]): PlannedPage[] {
-        const sourceBlocks: ContentBlock[] = blocks.map((b) => ({
-            id: b.sourceId,
-            heightMm: b.heightMm,
-            keepTogether: !b.isSplitPart,
-            splittable: b.isSplitPart,
-            payload: b.payload,
-        }));
-
+    private repackBlocksIntoPages(sourceBlocks: ContentBlock[], roles: ('single' | 'first' | 'middle' | 'last')[]): PlannedPage[] {
         const pages: PlannedPage[] = [];
         let i = 0;
         while (i < sourceBlocks.length) {
@@ -264,10 +263,21 @@ export class TypeScriptPdfLayoutEngine {
             const page = this.createEmptyPage(pageIndex + 1, role);
             pages.push(page);
 
-            while (i < sourceBlocks.length && this.tryPlaceBlock(page, sourceBlocks[i])) {
+            while (i < sourceBlocks.length) {
+                const current = sourceBlocks[i];
+                if (current.forcePageBreak) {
+                    i += 1;
+                    if (page.blocks.length === 0) continue;
+                    break;
+                }
+                if (!this.tryPlaceBlock(page, current)) break;
                 i += 1;
             }
 
+            if (page.blocks.length === 0 && i >= sourceBlocks.length) {
+                pages.pop();
+                break;
+            }
             if (page.blocks.length === 0 && i < sourceBlocks.length) {
                 throw new Error(`Unplaceable block during pagination: ${sourceBlocks[i].id}`);
             }
