@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { places } from './data';
-import { Download, Eye, X, Check, MapPin, Calendar, User, Globe, Image as ImageIcon, Edit2, Trash2, Plus, Phone, Plane, Camera, Palmtree, Compass, Cloud } from 'lucide-react';
+import { Download, Eye, X, Check, MapPin, Calendar, User, Globe, Image as ImageIcon, Edit2, Trash2, Plus, Phone, Plane, Camera, Palmtree, Compass, Cloud, AlertTriangle } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -127,6 +127,13 @@ function App() {
     const [showCityPreview, setShowCityPreview] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
     const [isGeneratingCityPdf, setIsGeneratingCityPdf] = useState(false);
+    const [systemPopup, setSystemPopup] = useState({
+        open: false,
+        title: '',
+        message: '',
+        details: '',
+        tone: 'error',
+    });
     const [cityPdfPlace, setCityPdfPlace] = useState(null);
     const [cityPdfSelectedSubIndexes, setCityPdfSelectedSubIndexes] = useState([]);
     const [userPlaces, setUserPlaces] = useState([]);
@@ -169,6 +176,54 @@ function App() {
     const shouldIncludeRouteMapPage = routeMapPlanForPdf?.attachToFinalPdf === true
         && hasRenderableRouteMapPlan(routeMapPlanForPdf)
         && Boolean(routeMapPlanForPdf?.mapSnapshot);
+
+    const showSystemPopup = React.useCallback(({
+        title = 'System Message',
+        message = 'Something went wrong. Please try again.',
+        details = '',
+        tone = 'error',
+    }) => {
+        setSystemPopup({
+            open: true,
+            title,
+            message,
+            details: typeof details === 'string' ? details : String(details || ''),
+            tone,
+        });
+    }, []);
+
+    const closeSystemPopup = React.useCallback(() => {
+        setSystemPopup((prev) => ({ ...prev, open: false }));
+    }, []);
+
+    React.useEffect(() => {
+        const onUnhandledError = (event) => {
+            const message = event?.error?.message || event?.message || 'Unexpected runtime error';
+            showSystemPopup({
+                title: 'Unexpected Error',
+                message: 'The system encountered an unexpected issue.',
+                details: message,
+                tone: 'error',
+            });
+        };
+        const onUnhandledRejection = (event) => {
+            const reason = event?.reason;
+            const message = reason?.message || (typeof reason === 'string' ? reason : 'Unhandled async error');
+            showSystemPopup({
+                title: 'Async Error',
+                message: 'An asynchronous task failed unexpectedly.',
+                details: message,
+                tone: 'error',
+            });
+        };
+
+        window.addEventListener('error', onUnhandledError);
+        window.addEventListener('unhandledrejection', onUnhandledRejection);
+        return () => {
+            window.removeEventListener('error', onUnhandledError);
+            window.removeEventListener('unhandledrejection', onUnhandledRejection);
+        };
+    }, [showSystemPopup]);
 
     React.useEffect(() => {
         // Simulate initial loading for a premium feel
@@ -271,6 +326,12 @@ function App() {
 
             } catch (err) {
                 console.error("Error fetching initial data", err);
+                showSystemPopup({
+                    title: 'Loading Error',
+                    message: 'Initial data could not be loaded.',
+                    details: err?.message || 'Please refresh and try again.',
+                    tone: 'error',
+                });
 
             }
         };
@@ -278,7 +339,7 @@ function App() {
         fetchAllData();
 
         return () => clearTimeout(timer);
-    }, []);
+    }, [showSystemPopup]);
 
 
     const [placesList, setPlacesList] = useState(() => {
@@ -477,7 +538,11 @@ function App() {
 
     const handleAddPlace = async () => {
         if (!newPlace.name || !newPlace.description || !newPlace.image) {
-            alert("Please provide place name, description and image.");
+            showSystemPopup({
+                title: 'Missing Required Fields',
+                message: 'Please provide place name, description and image.',
+                tone: 'warning',
+            });
             return;
         }
         const normalizedSubPlaces = normalizeSubPlaces(newPlace.subPlaces);
@@ -504,7 +569,12 @@ function App() {
                 });
             } catch (e) {
                 console.error("Failed to update Supabase", e);
-                alert("Failed to update destination in backend. Local changes are kept.");
+                showSystemPopup({
+                    title: 'Backend Update Failed',
+                    message: 'Failed to update destination in backend. Local changes are kept.',
+                    details: e?.message || '',
+                    tone: 'error',
+                });
             }
 
             const updateFn = (list) => list.map(p => p.id === editingPlaceId ? { ...normalizedPlace, id: editingPlaceId } : p);
@@ -551,7 +621,12 @@ function App() {
                 });
             } catch (e) {
                 console.error("Failed to insert into Supabase", e);
-                alert("Failed to save new destination in backend. Local changes are kept.");
+                showSystemPopup({
+                    title: 'Backend Save Failed',
+                    message: 'Failed to save new destination in backend. Local changes are kept.',
+                    details: e?.message || '',
+                    tone: 'error',
+                });
             }
 
             setUserPlaces(prev => [...prev, p]);
@@ -603,7 +678,11 @@ function App() {
 
     const handleNewPlaceImage = async (e) => {
         if (!isAdmin) {
-            alert("Only admin can change images.");
+            showSystemPopup({
+                title: 'Permission Required',
+                message: 'Only admin can change images.',
+                tone: 'warning',
+            });
             return;
         }
         const file = e.target.files[0];
@@ -615,7 +694,11 @@ function App() {
 
     const handleNewPlaceImage2 = async (e) => {
         if (!isAdmin) {
-            alert("Only admin can change images.");
+            showSystemPopup({
+                title: 'Permission Required',
+                message: 'Only admin can change images.',
+                tone: 'warning',
+            });
             return;
         }
         const file = e.target.files[0];
@@ -628,7 +711,11 @@ function App() {
 
     const handleGalleryUpload = async (e) => {
         if (!isAdmin) {
-            alert("Only admin can add images.");
+            showSystemPopup({
+                title: 'Permission Required',
+                message: 'Only admin can add images.',
+                tone: 'warning',
+            });
             return;
         }
         const files = Array.from(e.target.files);
@@ -647,13 +734,21 @@ function App() {
 
     const handleGalleryDelete = (imageToDelete) => {
         if (!isAdmin) {
-            alert("Only admin can remove images.");
+            showSystemPopup({
+                title: 'Permission Required',
+                message: 'Only admin can remove images.',
+                tone: 'warning',
+            });
             return;
         }
         // Prevent deleting default images
         const defaultImages = galleryDataRaw[editingPlaceId] || [];
         if (defaultImages.includes(imageToDelete)) {
-            alert("This is a default image and cannot be deleted.");
+            showSystemPopup({
+                title: 'Action Not Allowed',
+                message: 'This is a default image and cannot be deleted.',
+                tone: 'warning',
+            });
             return;
         }
 
@@ -670,7 +765,11 @@ function App() {
 
     const setFromGallery = (imgUrl, type) => {
         if (!isAdmin) {
-            alert("Only admin can change selected images.");
+            showSystemPopup({
+                title: 'Permission Required',
+                message: 'Only admin can change selected images.',
+                tone: 'warning',
+            });
             return;
         }
         if (type === 'primary') {
@@ -889,13 +988,23 @@ function App() {
                 const container = document.getElementById('hidden-pdf-content');
                 if (!container) {
                     console.error("PDF container not found");
+                    showSystemPopup({
+                        title: 'PDF Error',
+                        message: 'PDF container was not found.',
+                        details: 'Please reopen preview and try again.',
+                        tone: 'error',
+                    });
                     setIsGenerating(false);
                     return;
                 }
                 const pageElements = container.querySelectorAll('.pdf-page');
 
                 if (pageElements.length === 0) {
-                    alert("Please add some places to the itinerary first.");
+                    showSystemPopup({
+                        title: 'No Itinerary Content',
+                        message: 'Please add some places to the itinerary first.',
+                        tone: 'warning',
+                    });
                     setIsGenerating(false);
                     return;
                 }
@@ -974,7 +1083,12 @@ function App() {
                 pdf.save(`Invel-Sri-Lanka-Itinerary-${dateStr}.pdf`);
             } catch (error) {
                 console.error(error);
-                alert("Error generating PDF. Please try again.");
+                showSystemPopup({
+                    title: 'PDF Generation Failed',
+                    message: 'Error generating PDF. Please try again.',
+                    details: error?.message || '',
+                    tone: 'error',
+                });
             } finally {
                 setIsGenerating(false);
             }
@@ -1029,7 +1143,12 @@ function App() {
                 await downloadCityPdfFromContainer(CITY_PDF_CONTAINER_ID, preparedPlace.name);
             } catch (error) {
                 console.error(error);
-                alert("Error generating city PDF. Please try again.");
+                showSystemPopup({
+                    title: 'City PDF Generation Failed',
+                    message: 'Error generating city PDF. Please try again.',
+                    details: error?.message || '',
+                    tone: 'error',
+                });
             } finally {
                 setIsGeneratingCityPdf(false);
                 if (!showCityPreview) {
@@ -2084,6 +2203,74 @@ function App() {
                     </div>
                 </div>
             )}
+
+            <AnimatePresence>
+                {systemPopup.open && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="modal-overlay"
+                        style={{ zIndex: 3000 }}
+                    >
+                        <motion.div
+                            initial={{ y: 24, opacity: 0, scale: 0.98 }}
+                            animate={{ y: 0, opacity: 1, scale: 1 }}
+                            exit={{ y: 16, opacity: 0, scale: 0.98 }}
+                            transition={{ type: 'spring', stiffness: 280, damping: 24 }}
+                            style={{
+                                width: 'min(92vw, 620px)',
+                                borderRadius: '18px',
+                                border: systemPopup.tone === 'warning' ? '1px solid #f59e0b' : '1px solid #f97316',
+                                background: 'linear-gradient(145deg, #fff7ed 0%, #ffffff 60%)',
+                                boxShadow: '0 24px 60px rgba(0,0,0,0.25)',
+                                overflow: 'hidden',
+                            }}
+                        >
+                            <div style={{ padding: '20px 24px', borderBottom: '1px solid #fed7aa', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                    <div style={{
+                                        width: '40px',
+                                        height: '40px',
+                                        borderRadius: '12px',
+                                        background: systemPopup.tone === 'warning' ? '#fef3c7' : '#ffedd5',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        color: systemPopup.tone === 'warning' ? '#b45309' : '#c2410c',
+                                    }}>
+                                        <AlertTriangle size={20} />
+                                    </div>
+                                    <div>
+                                        <div style={{ fontSize: '1rem', fontWeight: 800, letterSpacing: '0.2px', color: '#7c2d12' }}>{systemPopup.title}</div>
+                                        <div style={{ fontSize: '0.78rem', color: '#9a3412', textTransform: 'uppercase', letterSpacing: '0.7px', marginTop: '2px' }}>
+                                            Premium System Notice
+                                        </div>
+                                    </div>
+                                </div>
+                                <button className="close-btn" onClick={closeSystemPopup} style={{ position: 'static', width: '34px', height: '34px' }}>
+                                    <X size={18} />
+                                </button>
+                            </div>
+
+                            <div style={{ padding: '22px 24px 16px', color: '#7c2d12' }}>
+                                <p style={{ margin: 0, fontSize: '1rem', lineHeight: 1.5 }}>{systemPopup.message}</p>
+                                {systemPopup.details && (
+                                    <div style={{ marginTop: '12px', fontSize: '0.86rem', lineHeight: 1.45, color: '#9a3412', background: '#fff7ed', border: '1px solid #fdba74', borderRadius: '10px', padding: '10px 12px', wordBreak: 'break-word' }}>
+                                        {systemPopup.details}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div style={{ padding: '0 24px 22px', display: 'flex', justifyContent: 'flex-end' }}>
+                                <button className="btn btn-primary" style={{ width: 'auto', padding: '10px 22px' }} onClick={closeSystemPopup}>
+                                    Close
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             <AnimatePresence>
                 {showPreview && (
