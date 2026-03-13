@@ -110,24 +110,25 @@ const TrackMapView = ({ onViewChange, onMapReady }) => {
   return null;
 };
 
-export const RouteMapPdfPage = ({ plan }) => {
-  const safe = normalizePlan(plan);
-  if (safe.mapSnapshot) {
-    return (
-      <div className="pdf-page route-map-pdf-page" style={{ width: '210mm', minHeight: '297mm', background: '#fff', padding: '16mm 14mm 12mm' }}>
-        <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', padding: '14px' }}>
-          <h2 style={{ margin: 0, color: '#0f172a', fontSize: '1.25rem' }}>Sri Lanka Route Map</h2>
-          <p style={{ margin: '8px 0 14px', color: '#475569', fontSize: '0.9rem' }}>
-            Captured map view with selected locations and combined route.
-          </p>
-          <div style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid #dbeafe' }}>
-            <img src={safe.mapSnapshot} alt="Sri Lanka route map snapshot" style={{ width: '100%', display: 'block' }} />
-          </div>
-        </div>
+const RouteMapPdfFooter = () => (
+  <div className="pdf-footer-premium">
+    <div className="footer-top">
+      <div className="footer-brand">
+        <h3>INVEL HOLIDAYS SRI LANKA</h3>
+        <p>www.invelsrilanka.com</p>
+        <p style={{ fontSize: '0.75rem', marginTop: '10px', opacity: 0.8 }}>(c) {new Date().getFullYear()} Invel Holidays - Where Journeys Become Stories</p>
       </div>
-    );
-  }
+      <div className="footer-contact-grid">
+        <div className="contact-item">No. 197/43A, Vihara Mawatha, Athurugiriya, Sri Lanka.</div>
+        <div className="contact-item">invelholidays@gmail.com</div>
+        <div className="contact-item">+94 11 588 2489</div>
+      </div>
+    </div>
+  </div>
+);
 
+export const RouteMapPdfPage = ({ plan, showFooter = false }) => {
+  const safe = normalizePlan(plan);
   const routePoints = Array.isArray(safe.routeCoords)
     ? safe.routeCoords.map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) })).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng))
     : [];
@@ -141,55 +142,75 @@ export const RouteMapPdfPage = ({ plan }) => {
   const stopSvg = stopPoints.map((p) => toSriLankaCanvasPoint(p, width, height));
 
   return (
-    <div className="pdf-page route-map-pdf-page" style={{ width: '210mm', minHeight: '297mm', background: '#fff', padding: '16mm 14mm 12mm' }}>
-      <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', padding: '14px' }}>
-        <h2 style={{ margin: 0, color: '#0f172a', fontSize: '1.25rem' }}>Sri Lanka Route Map</h2>
-        <p style={{ margin: '8px 0 14px', color: '#475569', fontSize: '0.9rem' }}>
-          Entire Sri Lanka view with red destination points and combined route line.
-        </p>
+    <div className="pdf-page route-map-pdf-page">
+      <div className="pdf-page-border"></div>
+      <div className="pdf-page-content">
+        <div className="pdf-page-inner">
+          <div className="pdf-fixed-content" data-pdf-role="body">
+            <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', padding: '14px', background: '#fff' }}>
+              <h2 style={{ margin: 0, color: '#0f172a', fontSize: '1.25rem' }}>Sri Lanka Route Map</h2>
+              <p style={{ margin: '8px 0 14px', color: '#475569', fontSize: '0.9rem' }}>
+                {safe.mapSnapshot
+                  ? 'Captured map view with selected locations and combined route.'
+                  : 'Entire Sri Lanka view with red destination points and combined route line.'}
+              </p>
 
-        <div style={{ background: '#f8fafc', borderRadius: '10px', border: '1px solid #dbeafe', padding: '8px' }}>
-          <svg viewBox={`0 0 ${width} ${height}`} width="100%" height="340" role="img" aria-label="Sri Lanka route map">
-            <rect x="0" y="0" width={width} height={height} fill="#f8fafc" />
+              {safe.mapSnapshot ? (
+                <div style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid #dbeafe' }}>
+                  <img src={safe.mapSnapshot} alt="Sri Lanka route map snapshot" style={{ width: '100%', display: 'block' }} />
+                </div>
+              ) : (
+                <div style={{ background: '#f8fafc', borderRadius: '10px', border: '1px solid #dbeafe', padding: '8px' }}>
+                  <svg viewBox={`0 0 ${width} ${height}`} width="100%" height="340" role="img" aria-label="Sri Lanka route map">
+                    <rect x="0" y="0" width={width} height={height} fill="#f8fafc" />
 
-            <path
-              d="M488 36 C530 62, 556 108, 552 156 C548 198, 520 240, 502 272 C486 302, 458 340, 425 372 C390 406, 346 404, 312 380 C276 354, 254 322, 230 286 C208 254, 190 220, 196 178 C202 138, 224 104, 250 78 C280 48, 320 28, 362 26 C408 24, 454 26, 488 36 Z"
-              fill="#e2f2df"
-              stroke="#7ca982"
-              strokeWidth="3"
-              opacity="0.92"
-            />
+                    <path
+                      d="M488 36 C530 62, 556 108, 552 156 C548 198, 520 240, 502 272 C486 302, 458 340, 425 372 C390 406, 346 404, 312 380 C276 354, 254 322, 230 286 C208 254, 190 220, 196 178 C202 138, 224 104, 250 78 C280 48, 320 28, 362 26 C408 24, 454 26, 488 36 Z"
+                      fill="#e2f2df"
+                      stroke="#7ca982"
+                      strokeWidth="3"
+                      opacity="0.92"
+                    />
 
-            {routeSvg.length > 1 && (
-              <polyline
-                points={routeSvg.map((p) => `${p.x},${p.y}`).join(' ')}
-                fill="none"
-                stroke="#dc2626"
-                strokeWidth="5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                opacity="0.95"
-              />
-            )}
+                    {routeSvg.length > 1 && (
+                      <polyline
+                        points={routeSvg.map((p) => `${p.x},${p.y}`).join(' ')}
+                        fill="none"
+                        stroke="#dc2626"
+                        strokeWidth="5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        opacity="0.95"
+                      />
+                    )}
 
-            {stopSvg.map((p, idx) => (
-              <g key={`stop-${idx}`}>
-                <circle cx={p.x} cy={p.y} r="8" fill="#dc2626" stroke="#fff" strokeWidth="3" />
-                <text x={p.x + 10} y={p.y - 10} fill="#0f172a" fontSize="13" fontWeight="700">{idx + 1}</text>
-              </g>
-            ))}
-          </svg>
-        </div>
+                    {stopSvg.map((p, idx) => (
+                      <g key={`stop-${idx}`}>
+                        <circle cx={p.x} cy={p.y} r="8" fill="#dc2626" stroke="#fff" strokeWidth="3" />
+                        <text x={p.x + 10} y={p.y - 10} fill="#0f172a" fontSize="13" fontWeight="700">{idx + 1}</text>
+                      </g>
+                    ))}
+                  </svg>
+                </div>
+              )}
 
-        <div style={{ marginTop: '12px', borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>
-          <h3 style={{ margin: '0 0 8px', color: '#1e293b', fontSize: '0.95rem' }}>Stops</h3>
-          <div style={{ display: 'grid', gap: '6px' }}>
-            {stopPoints.map((stop, idx) => (
-              <div key={`${stop.id || stop.name}-${idx}`} style={{ fontSize: '0.85rem', color: '#334155' }}>
-                {idx + 1}. {stop.shortName || stop.name}
+              <div style={{ marginTop: '12px', borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>
+                <h3 style={{ margin: '0 0 8px', color: '#1e293b', fontSize: '0.95rem' }}>Stops</h3>
+                <div style={{ display: 'grid', gap: '6px' }}>
+                  {stopPoints.map((stop, idx) => (
+                    <div key={`${stop.id || stop.name}-${idx}`} style={{ fontSize: '0.85rem', color: '#334155' }}>
+                      {idx + 1}. {stop.shortName || stop.name}
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
+            </div>
           </div>
+          {showFooter && (
+            <div className="pdf-fixed-footer" data-pdf-role="footer">
+              <RouteMapPdfFooter />
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -10,6 +10,7 @@ import galleryDataRaw from './gallery_data.json';
 import { supabase } from './supabase';
 import { CITY_PDF_CONTAINER_ID, CityPDFContent, downloadCityPdfFromContainer } from './cityPdf';
 import RouteMapPlanner, { RouteMapPdfPage, hasRenderableRouteMapPlan } from './components/RouteMapPlanner';
+import { ensurePdfLayoutValid } from './pdfLayoutValidation';
 
 const ROUTE_MAP_SNAPSHOT_KEY = 'route_map_saved_snapshot_v1';
 const LOGIN_ROLE_KEY = 'itinerary_login_role_v1';
@@ -959,6 +960,8 @@ function App() {
                     setIsGenerating(false);
                     return;
                 }
+
+                ensurePdfLayoutValid(container, 'Itinerary PDF');
 
                 const pdf = new jsPDF('p', 'mm', 'a4');
                 const pdfWidth = pdf.internal.pageSize.getWidth();
@@ -2613,7 +2616,7 @@ const PDFPage = ({ children, pageNumber, totalPages, generationTime }) => (
             <div style={{
                 position: 'absolute',
                 right: '25px',
-                top: '6px',
+                top: '22px',
                 fontSize: '0.65rem',
                 opacity: 0.8,
                 fontStyle: 'italic',
@@ -2679,7 +2682,7 @@ const PDFContent = ({
                         generationTime={pageIndex === 0 ? generationTime : null}
                     >
                         {pageIndex === 0 && (
-                            <div className="pdf-fixed-header">
+                            <div className="pdf-fixed-header" data-pdf-role="header">
                                 <div className="pdf-header-premium">
                                 <div className="pdf-logo-wrapper">
                                     <img src="/logo.png" alt="Logo" className="pdf-logo-main" />
@@ -2747,7 +2750,7 @@ const PDFContent = ({
                             </div>
                         )}
 
-                        <div className="pdf-fixed-content">
+                        <div className="pdf-fixed-content" data-pdf-role="body">
                             {pageIndex === 0 && (
                                 <div className="pdf-welcome-section">
                                     <div className="welcome-tag">Ayubowan!</div>
@@ -2906,8 +2909,8 @@ const PDFContent = ({
                             </div>
                         </div>
 
-                        {pageIndex === pages.length - 1 && (
-                            <div className="pdf-footer-premium pdf-fixed-footer">
+                        {pageIndex === pages.length - 1 && !includeRouteMapPage && (
+                            <div className="pdf-footer-premium pdf-fixed-footer" data-pdf-role="footer">
                                 <div className="footer-top">
                                     <div className="footer-brand">
                                         <h3>INVEL HOLIDAYS SRI LANKA</h3>
@@ -2939,7 +2942,7 @@ const PDFContent = ({
             ))}
             {includeRouteMapPage && routeMapPlan && (
                 <div key="route-map-pdf-page">
-                    <RouteMapPdfPage plan={routeMapPlan} />
+                    <RouteMapPdfPage plan={routeMapPlan} showFooter />
                 </div>
             )}
         </div>

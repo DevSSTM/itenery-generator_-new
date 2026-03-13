@@ -1,0 +1,153 @@
+const PX_TOLERANCE = 1.5;
+const OVERFLOW_TOLERANCE = 1;
+
+const hasRenderableBox = (el) => {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+};
+
+const isInside = (inner, outer, tolerance = PX_TOLERANCE) => (
+    inner.left >= outer.left - tolerance
+    && inner.top >= outer.top - tolerance
+    && inner.right <= outer.right + tolerance
+    && inner.bottom <= outer.bottom + tolerance
+);
+
+const overlaps = (a, b, tolerance = 0.5) => (
+    a.left < b.right - tolerance
+    && a.right > b.left + tolerance
+    && a.top < b.bottom - tolerance
+    && a.bottom > b.top + tolerance
+);
+
+export const validatePdfLayout = (container) => {
+    const errors = [];
+    if (!container) {
+        return { ok: false, errors: ['PDF container not found'] };
+    }
+
+    const pages = Array.from(container.querySelectorAll('.pdf-page'));
+    if (pages.length === 0) {
+        return { ok: false, errors: ['No PDF pages found'] };
+    }
+
+    const expectedMargins = [];
+    const multiplePages = pages.length > 1;
+
+    pages.forEach((page, pageIndex) => {
+        const border = page.querySelector(':scope > .pdf-page-border');
+        const pageContent = page.querySelector(':scope > .pdf-page-content');
+        const header = page.querySelector('[data-pdf-role="header"]');
+        const body = page.querySelector('[data-pdf-role="body"]');
+        const footer = page.querySelector('[data-pdf-role="footer"]');
+
+        if (!border) errors.push(`Page ${pageIndex + 1}: missing page border`);
+        if (!pageContent) errors.push(`Page ${pageIndex + 1}: missing page content area`);
+        if (!body) errors.push(`Page ${pageIndex + 1}: missing body area`);
+
+        const shouldHaveHeader = multiplePages ? pageIndex === 0 : true;
+        const shouldHaveFooter = multiplePages ? pageIndex === pages.length - 1 : true;
+        if (Boolean(header) !== shouldHaveHeader) {
+            errors.push(`Page ${pageIndex + 1}: header placement rule failed`);
+        }
+        if (Boolean(footer) !== shouldHaveFooter) {
+            errors.push(`Page ${pageIndex + 1}: footer placement rule failed`);
+        }
+
+        if (!border || !pageContent) return;
+
+        const pageRect = page.getBoundingClientRect();
+        const borderRect = border.getBoundingClientRect();
+        const contentRect = pageContent.getBoundingClientRect();
+
+        const pageMargins = {
+            top: borderRect.top - pageRect.top,
+            right: pageRect.right - borderRect.right,
+            bottom: pageRect.bottom - borderRect.bottom,
+            left: borderRect.left - pageRect.left,
+        };
+        expectedMargins.push(pageMargins);
+
+        if (!isInside(contentRect, borderRect)) {
+            errors.push(`Page ${pageIndex + 1}: content area exceeds border area`);
+        }
+
+        if (header && body) {
+            const headerRect = header.getBoundingClientRect();
+            const bodyRect = body.getBoundingClientRect();
+            if (!isInside(headerRect, borderRect)) {
+                errors.push(`Page ${pageIndex + 1}: header crosses border`);
+            }
+            if (!isInside(bodyRect, borderRect)) {
+                errors.push(`Page ${pageIndex + 1}: body crosses border`);
+            }
+            if (headerRect.bottom > bodyRect.top + 0.5 || overlaps(headerRect, bodyRect)) {
+                errors.push(`Page ${pageIndex + 1}: body overlaps header`);
+            }
+        } else if (body) {
+            const bodyRect = body.getBoundingClientRect();
+            if (!isInside(bodyRect, borderRect)) {
+                errors.push(`Page ${pageIndex + 1}: body crosses border`);
+            }
+        }
+
+        if (footer) {
+            const footerRect = footer.getBoundingClientRect();
+            if (!isInside(footerRect, borderRect)) {
+                errors.push(`Page ${pageIndex + 1}: footer crosses border`);
+            }
+            if (body) {
+                const bodyRect = body.getBoundingClientRect();
+                if (bodyRect.bottom > footerRect.top + 0.5 || overlaps(bodyRect, footerRect)) {
+                    errors.push(`Page ${pageIndex + 1}: body overlaps footer`);
+                }
+            }
+        }
+
+        if (body) {
+            if ((body.scrollHeight - body.clientHeight) > OVERFLOW_TOLERANCE) {
+                errors.push(`Page ${pageIndex + 1}: body content overflows vertically`);
+            }
+            if ((body.scrollWidth - body.clientWidth) > OVERFLOW_TOLERANCE) {
+                errors.push(`Page ${pageIndex + 1}: body content overflows horizontally`);
+            }
+        }
+
+        const nodes = Array.from(page.querySelectorAll('.pdf-page-content *'));
+        nodes.forEach((node) => {
+            if (!hasRenderableBox(node)) return;
+            const rect = node.getBoundingClientRect();
+            if (!isInside(rect, borderRect)) {
+                errors.push(`Page ${pageIndex + 1}: element leaves printable border`);
+            }
+        });
+    });
+
+    if (expectedMargins.length > 1) {
+        const baseline = expectedMargins[0];
+        expectedMargins.slice(1).forEach((m, idx) => {
+            const p = idx + 2;
+            if (
+                Math.abs(m.top - baseline.top) > PX_TOLERANCE
+                || Math.abs(m.right - baseline.right) > PX_TOLERANCE
+                || Math.abs(m.bottom - baseline.bottom) > PX_TOLERANCE
+                || Math.abs(m.left - baseline.left) > PX_TOLERANCE
+            ) {
+                errors.push(`Page ${p}: border spacing differs from page 1`);
+            }
+        });
+    }
+
+    return { ok: errors.length === 0, errors };
+};
+
+export const ensurePdfLayoutValid = (container, label = 'PDF') => {
+    const result = validatePdfLayout(container);
+    if (!result.ok) {
+        const compact = result.errors.slice(0, 6).join(' | ');
+        throw new Error(`${label} layout validation failed: ${compact}`);
+    }
+};

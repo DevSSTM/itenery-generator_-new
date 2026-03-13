@@ -1,6 +1,7 @@
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { MapPin, Globe, Phone } from 'lucide-react';
+import { ensurePdfLayoutValid } from './pdfLayoutValidation';
 
 export const CITY_PDF_CONTAINER_ID = 'hidden-city-pdf-content';
 
@@ -59,7 +60,6 @@ const paginateCityFlow = (flowItems) => {
             itemWeight = item.subDesc ? 0.26 : 0.18;
         }
 
-        // Keep stronger safety margin on page 1 to avoid touching/overlapping footer line.
         const maxWeight = pages.length === 0 ? 5.1 : 5.75;
         if (weight + itemWeight > maxWeight && current.length > 0) {
             pages.push(current);
@@ -147,74 +147,84 @@ export const CityPDFContent = ({ place }) => {
                 return (
                     <div key={`city-page-${pageIndex}`}>
                         <CityPdfPage>
-                            <CityPdfHeader />
+                            {pageIndex === 0 && (
+                                <div className="pdf-fixed-header" data-pdf-role="header">
+                                    <CityPdfHeader />
+                                </div>
+                            )}
 
-                            <div className="pdf-day-item" style={{ marginBottom: '16px' }}>
-                                {pageIndex === 0 && (
-                                    <div className="pdf-day-header" style={{ marginBottom: '10px', borderBottom: '2px solid #f8f8f8' }}>
-                                        <div className="day-title-wrapper">
-                                            <h2 style={{ fontSize: showImages ? '1.8rem' : '1.35rem' }}>
-                                                {place.name}
-                                            </h2>
-                                            {showImages && place.title && <div className="day-subtitle">{place.title}</div>}
+                            <div className="pdf-fixed-content" data-pdf-role="body">
+                                <div className="pdf-day-item" style={{ marginBottom: '16px' }}>
+                                    {pageIndex === 0 && (
+                                        <div className="pdf-day-header" style={{ marginBottom: '10px', borderBottom: '2px solid #f8f8f8' }}>
+                                            <div className="day-title-wrapper">
+                                                <h2 style={{ fontSize: showImages ? '1.8rem' : '1.35rem' }}>
+                                                    {place.name}
+                                                </h2>
+                                                {showImages && place.title && <div className="day-subtitle">{place.title}</div>}
+                                            </div>
                                         </div>
-                                    </div>
-                                )}
+                                    )}
 
-                                {showImages ? (
-                                    <div className="pdf-day-content" style={{ display: 'grid' }}>
-                                        <div className="pdf-day-image-wrapper">
-                                            <img
-                                                src={headItem.image}
-                                                alt={place.name}
-                                                className="pdf-day-image"
-                                                style={{ height: headItem.image2 ? '135px' : '210px', marginBottom: headItem.image2 ? '10px' : '0' }}
-                                            />
-                                            {headItem.image2 && (
+                                    {showImages ? (
+                                        <div className="pdf-day-content" style={{ display: 'grid' }}>
+                                            <div className="pdf-day-image-wrapper">
                                                 <img
-                                                    src={headItem.image2}
-                                                    alt={`${place.name} 2`}
+                                                    src={headItem.image}
+                                                    alt={place.name}
                                                     className="pdf-day-image"
-                                                    style={{ height: '135px' }}
+                                                    style={{ height: headItem.image2 ? '135px' : '210px', marginBottom: headItem.image2 ? '10px' : '0' }}
                                                 />
-                                            )}
+                                                {headItem.image2 && (
+                                                    <img
+                                                        src={headItem.image2}
+                                                        alt={`${place.name} 2`}
+                                                        className="pdf-day-image"
+                                                        style={{ height: '135px' }}
+                                                    />
+                                                )}
+                                            </div>
+                                            <div className="pdf-day-description" style={{ flex: 1 }}>
+                                                <p style={{ whiteSpace: 'pre-line', textAlign: 'justify' }}>{paragraphs.join('\n\n')}</p>
+                                            </div>
                                         </div>
+                                    ) : (
                                         <div className="pdf-day-description" style={{ flex: 1 }}>
                                             <p style={{ whiteSpace: 'pre-line', textAlign: 'justify' }}>{paragraphs.join('\n\n')}</p>
                                         </div>
-                                    </div>
-                                ) : (
-                                    <div className="pdf-day-description" style={{ flex: 1 }}>
-                                        <p style={{ whiteSpace: 'pre-line', textAlign: 'justify' }}>{paragraphs.join('\n\n')}</p>
-                                    </div>
-                                )}
+                                    )}
 
-                                {points.length > 0 && (
-                                    <div style={{ marginTop: '12px' }}>
-                                        {pageIndex === 0 && (
-                                            <div style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--primary)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px', textAlign: 'left' }}>
-                                                Visiting Places
-                                            </div>
-                                        )}
-                                        <ul style={{ listStyleType: 'disc', paddingLeft: '18px', margin: 0, textAlign: 'left' }}>
-                                            {points.map((point, idx) => (
-                                                <li key={idx} style={{ marginBottom: '8px', lineHeight: '1.45' }}>
-                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                                                        <span style={{ fontWeight: '700', color: '#1a365d', fontSize: '0.9rem' }}>{point.subName}</span>
-                                                        {point.subDesc && (
-                                                            <span style={{ fontSize: '0.82rem', color: '#4a5568', marginTop: '2px' }}>
-                                                                {point.subDesc}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                )}
+                                    {points.length > 0 && (
+                                        <div style={{ marginTop: '12px' }}>
+                                            {pageIndex === 0 && (
+                                                <div style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--primary)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px', textAlign: 'left' }}>
+                                                    Visiting Places
+                                                </div>
+                                            )}
+                                            <ul style={{ listStyleType: 'disc', paddingLeft: '18px', margin: 0, textAlign: 'left' }}>
+                                                {points.map((point, idx) => (
+                                                    <li key={idx} style={{ marginBottom: '8px', lineHeight: '1.45' }}>
+                                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                                                            <span style={{ fontWeight: '700', color: '#1a365d', fontSize: '0.9rem' }}>{point.subName}</span>
+                                                            {point.subDesc && (
+                                                                <span style={{ fontSize: '0.82rem', color: '#4a5568', marginTop: '2px' }}>
+                                                                    {point.subDesc}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
 
-                            {isLastPage && <CityPdfFooter />}
+                            {isLastPage && (
+                                <div className="pdf-fixed-footer" data-pdf-role="footer">
+                                    <CityPdfFooter />
+                                </div>
+                            )}
                         </CityPdfPage>
                     </div>
                 );
@@ -233,6 +243,8 @@ export const downloadCityPdfFromContainer = async (containerId, placeName) => {
     if (!pageElements || pageElements.length === 0) {
         throw new Error('City PDF content is not ready');
     }
+
+    ensurePdfLayoutValid(container, 'City PDF');
 
     const pdf = new jsPDF('p', 'mm', 'a4');
     const pdfWidth = pdf.internal.pageSize.getWidth();
