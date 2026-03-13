@@ -124,9 +124,10 @@ export const validatePdfLayout = (container) => {
             }
         }
 
-        const nodes = Array.from(page.querySelectorAll('.pdf-page-content *'));
+        const nodes = body ? Array.from(body.querySelectorAll('*')) : [];
         nodes.forEach((node) => {
             if (!hasRenderableBox(node)) return;
+            if (node.tagName === 'SVG' || node.tagName === 'PATH') return;
             const rect = node.getBoundingClientRect();
             if (!isInside(rect, borderRect)) {
                 errors.push(`Page ${pageIndex + 1}: element leaves printable border`);
