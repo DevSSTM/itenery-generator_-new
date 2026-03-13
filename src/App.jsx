@@ -16,6 +16,7 @@ import { TypeScriptPdfLayoutEngine } from './pdf-engine';
 const ROUTE_MAP_SNAPSHOT_KEY = 'route_map_saved_snapshot_v1';
 const LOGIN_ROLE_KEY = 'itinerary_login_role_v1';
 const SUB_PLACES_BACKUP_KEY = 'destination_sub_places_backup_v1';
+const DESTINATION_WRITE_QUEUE_KEY = 'destination_pending_write_queue_v1';
 const LOCAL_LOGIN_CREDENTIALS = {
     admin: 'admin',
     user: 'user',
@@ -148,6 +149,24 @@ const hydrateSelectedSubPlaces = (selectedSubPlaces, masterSubPlaces) => {
         .filter(Boolean);
 };
 
+const readDestinationWriteQueue = () => {
+    try {
+        const raw = localStorage.getItem(DESTINATION_WRITE_QUEUE_KEY) || '[]';
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+};
+
+const writeDestinationWriteQueue = (queue) => {
+    try {
+        localStorage.setItem(DESTINATION_WRITE_QUEUE_KEY, JSON.stringify(Array.isArray(queue) ? queue : []));
+    } catch {
+        // Ignore localStorage errors.
+    }
+};
+
 function App() {
     const [numDays, setNumDays] = useState(1);
     const [activeDay, setActiveDay] = useState(1);
@@ -236,6 +255,34 @@ function App() {
 
     const closeSystemPopup = React.useCallback(() => {
         setSystemPopup((prev) => ({ ...prev, open: false }));
+    }, []);
+
+    const enqueueDestinationWrite = React.useCallback((payload) => {
+        const queue = readDestinationWriteQueue();
+        const filtered = queue.filter((q) => q?.id !== payload?.id);
+        filtered.push(payload);
+        writeDestinationWriteQueue(filtered);
+    }, []);
+
+    const flushDestinationWriteQueue = React.useCallback(async () => {
+        const queue = readDestinationWriteQueue();
+        if (!queue.length) return { flushed: 0, failed: 0 };
+
+        const failed = [];
+        let flushed = 0;
+        for (const payload of queue) {
+            try {
+                const { error } = await supabase
+                    .from('destinations')
+                    .upsert(payload);
+                if (error) throw error;
+                flushed += 1;
+            } catch (_err) {
+                failed.push(payload);
+            }
+        }
+        writeDestinationWriteQueue(failed);
+        return { flushed, failed: failed.length };
     }, []);
 
     React.useEffect(() => {
@@ -371,6 +418,8 @@ function App() {
                             })
                         );
                     }
+
+                    await flushDestinationWriteQueue();
                 }
 
 
@@ -389,7 +438,7 @@ function App() {
         fetchAllData();
 
         return () => clearTimeout(timer);
-    }, [showSystemPopup]);
+    }, [showSystemPopup, flushDestinationWriteQueue]);
 
 
     const [placesList, setPlacesList] = useState(() => {
@@ -622,9 +671,18 @@ function App() {
                 }
             } catch (e) {
                 console.error("Failed to update Supabase", e);
+                enqueueDestinationWrite({
+                    id: editingPlaceId,
+                    name: normalizedPlace.name,
+                    title: normalizedPlace.title,
+                    description: normalizedPlace.description,
+                    image_url: normalizedPlace.image,
+                    image_url_2: normalizedPlace.image2,
+                    sub_places: normalizedSubPlaces,
+                });
                 showSystemPopup({
                     title: 'Backend Update Failed',
-                    message: 'Failed to update destination in backend. Local changes are kept.',
+                    message: 'Backend update failed now. Change is queued and will auto-sync later.',
                     details: e?.message || '',
                     tone: 'error',
                 });
@@ -677,9 +735,18 @@ function App() {
                 }
             } catch (e) {
                 console.error("Failed to insert into Supabase", e);
+                enqueueDestinationWrite({
+                    id: id,
+                    name: normalizedPlace.name,
+                    title: normalizedPlace.title || '',
+                    description: normalizedPlace.description,
+                    image_url: normalizedPlace.image,
+                    image_url_2: normalizedPlace.image2,
+                    sub_places: normalizedSubPlaces,
+                });
                 showSystemPopup({
                     title: 'Backend Save Failed',
-                    message: 'Failed to save new destination in backend. Local changes are kept.',
+                    message: 'Backend save failed now. New place is queued and will auto-sync later.',
                     details: e?.message || '',
                     tone: 'error',
                 });
