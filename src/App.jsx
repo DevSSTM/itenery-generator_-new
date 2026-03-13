@@ -11,6 +11,7 @@ import { supabase } from './supabase';
 import { CITY_PDF_CONTAINER_ID, CityPDFContent, downloadCityPdfFromContainer } from './cityPdf';
 import RouteMapPlanner, { RouteMapPdfPage, hasRenderableRouteMapPlan } from './components/RouteMapPlanner';
 import { ensurePdfLayoutValid } from './pdfLayoutValidation';
+import { TypeScriptPdfLayoutEngine } from './pdf-engine';
 
 const ROUTE_MAP_SNAPSHOT_KEY = 'route_map_saved_snapshot_v1';
 const LOGIN_ROLE_KEY = 'itinerary_login_role_v1';
@@ -752,9 +753,6 @@ function App() {
             }
         }
 
-        const BOTTOM_SIGNAL_MM = 2;
-        const PAGE_HEIGHT_MM = 297;
-
         const getItemWeight = (item) => {
             let weight = 0;
             if (item.type === 'dayNote') {
@@ -783,147 +781,88 @@ function App() {
             return weight;
         };
 
-        const packItems = (items, firstCap, otherCap) => {
-            const packed = [];
-            let current = [];
-            let currentWeight = 0;
+        const MM_PER_WEIGHT = 46;
+        const FIRST_PAGE_WELCOME_RESERVE_MM = 28;
+        const ENTRY_GAP_MM = 2;
+        const planner = new TypeScriptPdfLayoutEngine({
+            page: { width: 210, height: 297 },
+            margins: { top: 5, right: 5, bottom: 5, left: 5 },
+            headerHeightMm: 52,
+            footerHeightMm: 20,
+            blockGapMm: ENTRY_GAP_MM,
+        });
 
-            for (let index = 0; index < items.length; index++) {
-                const item = items[index];
-                const weight = getItemWeight(item);
-                const isFirstPackedPage = packed.length === 0;
-                const maxWeight = isFirstPackedPage ? firstCap : otherCap;
+        const entries = [];
+        for (let i = 0; i < flowItems.length; i++) {
+            const current = flowItems[i];
+            const next = flowItems[i + 1];
+            const canPairHead =
+                current.type === 'dest-head'
+                && next
+                && next.destId === current.destId
+                && (next.type === 'dest-para' || next.type === 'dest-highlight-point' || next.type === 'city-note-point');
 
-                // Keep destination head (title + images) with at least one following content block.
-                // This prevents "images on one page, text on next page" for any city.
-                if (item.type === 'dest-head') {
-                    const nextItem = items[index + 1];
-                    const sameDestNext =
-                        nextItem &&
-                        nextItem.destId === item.destId &&
-                        (nextItem.type === 'dest-para' || nextItem.type === 'dest-highlight-point' || nextItem.type === 'city-note-point');
-
-                    if (sameDestNext) {
-                        const pairWeight = weight + getItemWeight(nextItem);
-                        if (currentWeight + pairWeight > maxWeight && current.length > 0) {
-                            packed.push([...current]);
-                            current = [];
-                            currentWeight = 0;
-                        }
-                    }
-                }
-
-                // Hard guard: if city-note block starts after a dense city section (e.g. many highlights),
-                // move it to the next page early to avoid footer overlap.
-                if (item.type === 'city-note-point' && item.isFirst) {
-                    const hasSameDestHighlights = current.some(
-                        (it) => it.destId === item.destId && it.type === 'dest-highlight-point'
-                    );
-                    const denseThreshold = maxWeight * 0.66;
-                    if (hasSameDestHighlights && currentWeight > denseThreshold && current.length > 0) {
-                        packed.push([...current]);
-                        current = [];
-                        currentWeight = 0;
-                    }
-                }
-
-                if (currentWeight + weight > maxWeight && current.length > 0) {
-                    packed.push([...current]);
-                    current = [];
-                    currentWeight = 0;
-                }
-
-                current.push(item);
-                currentWeight += weight;
-
-                if (index === items.length - 1 && current.length > 0) {
-                    packed.push([...current]);
-                }
+            if (canPairHead) {
+                const pairWeight = getItemWeight(current) + getItemWeight(next);
+                entries.push({
+                    id: `entry-${i}`,
+                    itemIndexes: [i, i + 1],
+                    heightMm: Math.max(12, pairWeight * MM_PER_WEIGHT + ENTRY_GAP_MM),
+                    keepTogether: true,
+                });
+                i += 1;
+                continue;
             }
 
-            if (packed.length === 0) packed.push([]);
-            return packed;
-        };
-
-        // Header only on first page, footer only on last page.
-        const firstPageCapacity = 3.25 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM); // header + welcome (safer)
-        // Slightly relaxed ceiling for page 1 so short city content can follow "Airport - Arrival" when space allows.
-        const firstPageFillCapacity = (3.7 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM));
-        const middlePageCapacity = 5.6 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM); // no header/footer (safer)
-        const lastPageCapacity = 4.45 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM); // footer only (safer)
-        const singlePageCapacity = 3.0 * ((PAGE_HEIGHT_MM - BOTTOM_SIGNAL_MM) / PAGE_HEIGHT_MM); // header + footer (safer)
-
-        let pages = packItems(flowItems, firstPageCapacity, middlePageCapacity);
-
-        const getPageWeight = (items) => items.reduce((sum, it) => sum + getItemWeight(it), 0);
-        while (pages.length > 0) {
-            const lastIdx = pages.length - 1;
-            const lastPage = pages[lastIdx];
-            const cap = pages.length === 1 ? singlePageCapacity : lastPageCapacity;
-            let lastWeight = getPageWeight(lastPage);
-
-            if (lastWeight <= cap) break;
-
-            const overflowItems = [];
-            while (lastPage.length > 0 && lastWeight > cap) {
-                overflowItems.unshift(lastPage.pop());
-                lastWeight = getPageWeight(lastPage);
-            }
-
-            // Safety: never leave a destination head orphaned at page end.
-            // If the page ends with `dest-head` and no following item from same destination,
-            // move that head to next page along with overflow.
-            if (lastPage.length > 0) {
-                const tail = lastPage[lastPage.length - 1];
-                if (tail.type === 'dest-head') {
-                    overflowItems.unshift(lastPage.pop());
-                    lastWeight = getPageWeight(lastPage);
-                }
-            }
-
-            if (lastPage.length === 0) {
-                pages.pop();
-            }
-
-            const overflowPages = packItems(overflowItems, middlePageCapacity, middlePageCapacity);
-            pages = [...pages, ...overflowPages];
+            entries.push({
+                id: `entry-${i}`,
+                itemIndexes: [i],
+                heightMm: Math.max(8, getItemWeight(current) * MM_PER_WEIGHT),
+                keepTogether: true,
+            });
         }
 
-        if (pages.length > 1) {
-            const firstPage = pages[0];
-            const secondPage = pages[1];
-            let firstWeight = getPageWeight(firstPage);
+        const blocks = [
+            {
+                id: 'engine-first-page-reserve',
+                heightMm: FIRST_PAGE_WELCOME_RESERVE_MM,
+                keepTogether: true,
+                splittable: false,
+            },
+            ...entries.map((entry) => ({
+                id: entry.id,
+                heightMm: entry.heightMm,
+                keepTogether: entry.keepTogether,
+                splittable: false,
+            })),
+        ];
 
-            while (secondPage.length > 0) {
-                const firstFromSecond = secondPage[0];
-                let moveCount = 1;
-
-                // If next page starts with a destination head, keep at least one following same-destination
-                // content block together when moving to page 1.
-                if (firstFromSecond.type === 'dest-head') {
-                    const maybeNext = secondPage[1];
-                    const hasPairedContent =
-                        maybeNext &&
-                        maybeNext.destId === firstFromSecond.destId &&
-                        (maybeNext.type === 'dest-para' || maybeNext.type === 'dest-highlight-point' || maybeNext.type === 'city-note-point');
-                    if (hasPairedContent) moveCount = 2;
-                }
-
-                const movingItems = secondPage.slice(0, moveCount);
-                const movingWeight = movingItems.reduce((sum, it) => sum + getItemWeight(it), 0);
-                if (firstWeight + movingWeight > firstPageFillCapacity) break;
-
-                firstPage.push(...secondPage.splice(0, moveCount));
-                firstWeight += movingWeight;
-            }
-
-            if (secondPage.length === 0) {
-                pages.splice(1, 1);
-            }
+        let plan;
+        try {
+            plan = planner.layout(blocks);
+        } catch (_err) {
+            return [flowItems];
+        }
+        if (!plan.valid) {
+            return [flowItems];
         }
 
-        if (pages.length === 0) pages.push([]);
-        return pages;
+        const entryById = new Map(entries.map((entry) => [entry.id, entry]));
+        const pages = plan.pages.map((page) => {
+            const pageItems = [];
+            page.blocks.forEach((block) => {
+                if (block.sourceId === 'engine-first-page-reserve') return;
+                const entry = entryById.get(block.sourceId);
+                if (!entry) return;
+                entry.itemIndexes.forEach((idx) => {
+                    const item = flowItems[idx];
+                    if (item) pageItems.push(item);
+                });
+            });
+            return pageItems;
+        });
+
+        return pages.length > 0 ? pages : [[]];
     };
 
     const pagesData = paginatePlaces();

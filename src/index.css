@@ -653,6 +653,13 @@ header {
     margin-top: 0 !important;
 }
 
+/* City PDF header is shorter; reduce reserved zone to remove large top gap */
+.city-pdf-fixed-header {
+    flex: 0 0 112px;
+    min-height: 112px;
+    max-height: 112px;
+}
+
 /* Hard safety guards: keep all PDF content inside printable borders */
 .pdf-page *,
 .pdf-page *::before,

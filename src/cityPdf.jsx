@@ -2,6 +2,7 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { MapPin, Globe, Phone } from 'lucide-react';
 import { ensurePdfLayoutValid } from './pdfLayoutValidation';
+import { TypeScriptPdfLayoutEngine } from './pdf-engine';
 
 export const CITY_PDF_CONTAINER_ID = 'hidden-city-pdf-content';
 
@@ -46,37 +47,48 @@ const buildCityFlowItems = (place) => {
 };
 
 const paginateCityFlow = (flowItems) => {
-    const pages = [];
-    let current = [];
-    let weight = 0;
+    const getItemWeight = (item) => {
+        if (item.type === 'city-head') return item.image2 ? 2.2 : 1.9;
+        if (item.type === 'city-para') return Math.max(0.1, (item.text || '').length / 900);
+        if (item.type === 'city-point') return item.subDesc ? 0.26 : 0.18;
+        return 0.2;
+    };
 
-    flowItems.forEach((item, index) => {
-        let itemWeight = 0.2;
-        if (item.type === 'city-head') {
-            itemWeight = item.image2 ? 2.2 : 1.9;
-        } else if (item.type === 'city-para') {
-            itemWeight = Math.max(0.1, (item.text || '').length / 900);
-        } else if (item.type === 'city-point') {
-            itemWeight = item.subDesc ? 0.26 : 0.18;
-        }
-
-        const maxWeight = pages.length === 0 ? 5.1 : 5.75;
-        if (weight + itemWeight > maxWeight && current.length > 0) {
-            pages.push(current);
-            current = [];
-            weight = 0;
-        }
-
-        current.push(item);
-        weight += itemWeight;
-
-        if (index === flowItems.length - 1 && current.length > 0) {
-            pages.push(current);
-        }
+    const MM_PER_WEIGHT = 48;
+    const planner = new TypeScriptPdfLayoutEngine({
+        page: { width: 210, height: 297 },
+        margins: { top: 5, right: 5, bottom: 5, left: 5 },
+        headerHeightMm: 52,
+        footerHeightMm: 20,
+        blockGapMm: 2,
     });
 
-    if (pages.length === 0) pages.push([]);
-    return pages;
+    const blocks = flowItems.map((item, index) => ({
+        id: `city-${index}`,
+        heightMm: Math.max(8, getItemWeight(item) * MM_PER_WEIGHT),
+        keepTogether: true,
+        splittable: false,
+        payload: { index },
+    }));
+
+    let plan;
+    try {
+        plan = planner.layout(blocks);
+    } catch (_err) {
+        return [flowItems];
+    }
+    if (!plan.valid) {
+        return [flowItems];
+    }
+
+    const itemById = new Map(flowItems.map((item, idx) => [`city-${idx}`, item]));
+    const pages = plan.pages.map((page) =>
+        page.blocks
+            .map((b) => itemById.get(b.sourceId))
+            .filter(Boolean)
+    );
+
+    return pages.length > 0 ? pages : [[]];
 };
 
 const CityPdfHeader = () => (
@@ -148,7 +160,7 @@ export const CityPDFContent = ({ place }) => {
                     <div key={`city-page-${pageIndex}`}>
                         <CityPdfPage>
                             {pageIndex === 0 && (
-                                <div className="pdf-fixed-header" data-pdf-role="header">
+                                <div className="pdf-fixed-header city-pdf-fixed-header" data-pdf-role="header">
                                     <CityPdfHeader />
                                 </div>
                             )}
