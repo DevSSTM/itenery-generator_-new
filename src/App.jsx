@@ -892,12 +892,12 @@ function App() {
             return weight;
         };
 
-        const MM_PER_WEIGHT = 46;
-        const FIRST_PAGE_WELCOME_RESERVE_MM = 28;
-        const ENTRY_GAP_MM = 2;
+        const MM_PER_WEIGHT = 54;
+        const FIRST_PAGE_WELCOME_RESERVE_MM = 34;
+        const ENTRY_GAP_MM = 2.5;
         const planner = new TypeScriptPdfLayoutEngine({
             page: { width: 210, height: 297 },
-            margins: { top: 5, right: 5, bottom: 5, left: 5 },
+            margins: { top: 5, right: 5, bottom: 8, left: 5 },
             headerHeightMm: 52,
             footerHeightMm: 20,
             blockGapMm: ENTRY_GAP_MM,

@@ -620,15 +620,16 @@ header {
 }
 
 .pdf-page-inner {
-    padding: 20px 40px 10px 40px;
-    height: calc(100% - 30px);
-    /* Internal padding adjustment */
+    padding: 18px 34px 8px 34px;
+    height: 100%;
+    box-sizing: border-box;
     display: flex;
     flex-direction: column;
     justify-content: flex-start;
     background: rgba(255, 255, 255, 0.85);
     /* Solid-ish white for html2canvas stability */
     border-radius: 4px;
+    overflow: hidden;
 }
 
 /* Fixed three-zone layout for every itinerary page */
