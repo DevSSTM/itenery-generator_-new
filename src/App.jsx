@@ -313,12 +313,15 @@ function App() {
 
                     if (restoreQueue.length > 0) {
                         await Promise.all(
-                            restoreQueue.map((row) =>
-                                supabase
+                            restoreQueue.map(async (row) => {
+                                const { error } = await supabase
                                     .from('destinations')
                                     .update({ sub_places: row.sub_places })
-                                    .eq('id', row.id)
-                            )
+                                    .eq('id', row.id);
+                                if (error) {
+                                    throw error;
+                                }
+                            })
                         );
                     }
                 }
@@ -558,7 +561,7 @@ function App() {
 
             // Sync to Supabase in the background
             try {
-                await supabase.from('destinations').upsert({
+                const { error } = await supabase.from('destinations').upsert({
                     id: editingPlaceId,
                     name: normalizedPlace.name,
                     title: normalizedPlace.title,
@@ -567,6 +570,9 @@ function App() {
                     image_url_2: normalizedPlace.image2,
                     sub_places: normalizedSubPlaces
                 });
+                if (error) {
+                    throw error;
+                }
             } catch (e) {
                 console.error("Failed to update Supabase", e);
                 showSystemPopup({
@@ -610,7 +616,7 @@ function App() {
             const p = { ...normalizedPlace, id };
 
             try {
-                await supabase.from('destinations').insert({
+                const { error } = await supabase.from('destinations').insert({
                     id: id,
                     name: normalizedPlace.name,
                     title: normalizedPlace.title || '',
@@ -619,6 +625,9 @@ function App() {
                     image_url_2: normalizedPlace.image2,
                     sub_places: normalizedSubPlaces
                 });
+                if (error) {
+                    throw error;
+                }
             } catch (e) {
                 console.error("Failed to insert into Supabase", e);
                 showSystemPopup({
@@ -867,14 +876,17 @@ function App() {
                 const subName = typeof sub === 'string' ? sub : (sub?.name || '');
                 const subDesc = typeof sub === 'string' ? '' : (sub?.description || '');
                 const pointLen = (subName + ' ' + subDesc).trim().length;
-                weight = Math.max(0.2, 0.12 + (pointLen / 620));
+                const estimatedLines = Math.max(1, Math.ceil(pointLen / 70));
+                weight = Math.max(0.36, 0.2 + (pointLen / 520) + (estimatedLines * 0.09));
             } else if (item.type === 'city-note-point') {
                 const noteLen = (item.text || '').trim().length;
                 // First city-note line also carries the visual box title/container overhead.
                 if (item.isFirst) {
-                    weight = Math.max(0.42, 0.28 + (noteLen / 520));
+                    const estimatedLines = Math.max(1, Math.ceil(noteLen / 72));
+                    weight = Math.max(0.55, 0.34 + (noteLen / 460) + (estimatedLines * 0.08));
                 } else {
-                    weight = Math.max(0.22, 0.14 + (noteLen / 620));
+                    const estimatedLines = Math.max(1, Math.ceil(noteLen / 72));
+                    weight = Math.max(0.32, 0.2 + (noteLen / 560) + (estimatedLines * 0.05));
                 }
             }
             return weight;
@@ -889,6 +901,7 @@ function App() {
             headerHeightMm: 52,
             footerHeightMm: 20,
             blockGapMm: ENTRY_GAP_MM,
+            footerVisibility: 'last-and-single',
         });
 
         const entries = [];
@@ -899,7 +912,7 @@ function App() {
                 current.type === 'dest-head'
                 && next
                 && next.destId === current.destId
-                && (next.type === 'dest-para' || next.type === 'dest-highlight-point' || next.type === 'city-note-point');
+                && next.type === 'dest-para';
 
             if (canPairHead) {
                 const pairWeight = getItemWeight(current) + getItemWeight(next);
@@ -940,10 +953,10 @@ function App() {
         try {
             plan = planner.layout(blocks);
         } catch (_err) {
-            return [flowItems];
+            return [{ items: flowItems, showHeader: true, showFooter: true, footerExceptionApplied: false }];
         }
         if (!plan.valid) {
-            return [flowItems];
+            return [{ items: flowItems, showHeader: true, showFooter: true, footerExceptionApplied: false }];
         }
 
         const entryById = new Map(entries.map((entry) => [entry.id, entry]));
@@ -958,10 +971,15 @@ function App() {
                     if (item) pageItems.push(item);
                 });
             });
-            return pageItems;
+            return {
+                items: pageItems,
+                showHeader: page.showHeader,
+                showFooter: page.showFooter,
+                footerExceptionApplied: Boolean(page.footerExceptionApplied),
+            };
         });
 
-        return pages.length > 0 ? pages : [[]];
+        return pages.length > 0 ? pages : [{ items: [], showHeader: true, showFooter: true, footerExceptionApplied: false }];
     };
 
     const pagesData = paginatePlaces();
@@ -1621,13 +1639,14 @@ function App() {
                                     exit={{ opacity: 0, x: -20 }}
                                     className="builder-step"
                                 >
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px', flexWrap: 'wrap', gap: '15px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '35px', flexWrap: 'wrap', gap: '20px' }}>
                                         <div>
                                             <button
                                                 onClick={() => setCurrentStep(1)}
-                                                style={{ background: 'white', border: '1.5px solid #dc2626', color: '#dc2626', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px', marginBottom: '10px', padding: '6px 12px', borderRadius: '8px', fontWeight: 700 }}
+                                                className="btn btn-outline"
+                                                style={{ width: 'auto', padding: '8px 16px', fontSize: '0.85rem', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}
                                             >
-                                                Back to Menu
+                                                <Compass size={16} /> Back to Dashboard
                                             </button>
                                             <h1 className="section-title" style={{ margin: 0 }}>Design Your Journey</h1>
                                         </div>
@@ -1647,94 +1666,99 @@ function App() {
                                     </div>
 
                                     <div className="builder-content">
-                                        <div className="active-day-itinerary">
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                                                <h2 style={{ fontSize: '1.2rem', color: 'var(--primary)', margin: 0 }}>Day {activeDay} Destinations</h2>
-                                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 'bold', cursor: 'pointer', background: '#f8fafc', padding: '8px 15px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={showDayNote[activeDay] || false}
-                                                        onChange={(e) => {
-                                                            const checked = e.target.checked;
+                                        <div className="builder-card">
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px', flexWrap: 'wrap', gap: '15px' }}>
+                                                <h2 style={{ fontSize: '1.4rem', color: 'var(--primary)', margin: 0 }}>Day {activeDay} Destinations</h2>
+                                                
+                                                <div style={{ display: 'flex', gap: '12px' }}>
+                                                    <div 
+                                                        className="premium-switch-container"
+                                                        onClick={() => {
+                                                            const checked = !showDayNote[activeDay];
                                                             setShowDayNote(prev => ({ ...prev, [activeDay]: checked }));
                                                             if (!checked) setDayNoteText(prev => ({ ...prev, [activeDay]: '' }));
                                                         }}
-                                                    />
-                                                    Add Special Note for Day {activeDay}?
-                                                </label>
+                                                    >
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={showDayNote[activeDay] || false}
+                                                            onChange={() => {}} 
+                                                        />
+                                                        <span className="premium-switch-text">Day Highlights</span>
+                                                    </div>
+
+                                                    <div 
+                                                        className="premium-switch-container"
+                                                        onClick={() => {
+                                                            const checked = !showCityNote[activeDay];
+                                                            setShowCityNote(prev => ({ ...prev, [activeDay]: checked }));
+                                                            if (checked && activeDayCities.length > 0 && selectedCityForNote[activeDay] == null) {
+                                                                setSelectedCityForNote(prev => ({ ...prev, [activeDay]: 0 }));
+                                                            }
+                                                        }}
+                                                    >
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={showCityNote[activeDay] || false}
+                                                            onChange={() => {}}
+                                                        />
+                                                        <span className="premium-switch-text">City Tips</span>
+                                                    </div>
+                                                </div>
                                             </div>
 
-                                            {showDayNote[activeDay] && (
-                                                <motion.div
-                                                    initial={{ opacity: 0, y: -10 }}
-                                                    animate={{ opacity: 1, y: 0 }}
-                                                    style={{ marginBottom: '25px', padding: '20px', background: '#fff9e6', borderRadius: '12px', border: '1px solid #ffeeba' }}
-                                                >
-                                                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '12px', color: '#856404' }}>General Itinerary Note for Day {activeDay} (Point by Point)</label>
 
-                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
-                                                        {(dayNoteText[activeDay] || '').split('\n').filter(p => p.trim()).map((point, pIdx) => (
-                                                            <div key={pIdx} style={{ background: 'white', padding: '12px 15px', borderRadius: '8px', border: '1px solid #ffeeba', boxShadow: '0 2px 4px rgba(133, 100, 4, 0.05)' }}>
-                                                                {editingDayPointIdx === pIdx ? (
-                                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
-                                                                        <textarea
-                                                                            value={editingDayPointValue}
-                                                                            onChange={(e) => setEditingDayPointValue(e.target.value)}
-                                                                            style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--primary)', fontSize: '0.95rem', minHeight: '100px', background: 'white' }}
-                                                                        />
-                                                                        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-                                                                            <button
-                                                                                onClick={() => {
+                                            <AnimatePresence>
+                                                {showDayNote[activeDay] && (
+                                                    <motion.div
+                                                        initial={{ opacity: 0, height: 0 }}
+                                                        animate={{ opacity: 1, height: 'auto' }}
+                                                        exit={{ opacity: 0, height: 0 }}
+                                                        className="note-builder-container day-note"
+                                                    >
+                                                        <div className="note-label-premium"><Cloud size={14} /> Global Day {activeDay} Highlights</div>
+                                                        
+                                                        <div className="points-list-premium">
+                                                            {(dayNoteText[activeDay] || '').split('\n').filter(p => p.trim()).map((point, pIdx) => (
+                                                                <div key={pIdx} className="point-card-premium">
+                                                                    {editingDayPointIdx === pIdx ? (
+                                                                        <div style={{ width: '100%' }}>
+                                                                            <textarea
+                                                                                value={editingDayPointValue}
+                                                                                onChange={(e) => setEditingDayPointValue(e.target.value)}
+                                                                                className="premium-textarea-input"
+                                                                                style={{ minHeight: '80px', marginBottom: '10px' }}
+                                                                            />
+                                                                            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                                                                                <button onClick={() => {
                                                                                     const points = (dayNoteText[activeDay] || '').split('\n');
                                                                                     points[pIdx] = editingDayPointValue.trim();
                                                                                     setDayNoteText(prev => ({ ...prev, [activeDay]: points.join('\n') }));
                                                                                     setEditingDayPointIdx(null);
-                                                                                }}
-                                                                                className="btn btn-primary"
-                                                                                style={{ padding: '8px 16px', fontSize: '0.85rem' }}
-                                                                            >Save Changes</button>
-                                                                            <button
-                                                                                onClick={() => setEditingDayPointIdx(null)}
-                                                                                className="btn btn-outline"
-                                                                                style={{ padding: '8px 16px', fontSize: '0.85rem' }}
-                                                                            >Cancel</button>
+                                                                                }} className="btn btn-primary btn-sm" style={{ width: 'auto' }}>Save</button>
+                                                                                <button onClick={() => setEditingDayPointIdx(null)} className="btn btn-outline btn-sm" style={{ width: 'auto' }}>Cancel</button>
+                                                                            </div>
                                                                         </div>
-                                                                    </div>
-                                                                ) : (
-                                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                                        <span style={{ fontSize: '0.9rem', color: '#1a202c', flex: 1 }}>• {point}</span>
-                                                                        <div style={{ display: 'flex', gap: '5px' }}>
-                                                                            <button
-                                                                                onClick={() => {
-                                                                                    setEditingDayPointIdx(pIdx);
-                                                                                    setEditingDayPointValue(point);
-                                                                                }}
-                                                                                style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#64748b', borderRadius: '6px', padding: '6px', cursor: 'pointer' }}
-                                                                            >
-                                                                                <Edit2 size={14} />
-                                                                            </button>
-                                                                            <button
-                                                                                onClick={() => {
+                                                                    ) : (
+                                                                        <>
+                                                                            <div className="point-text"><span className="point-text-bullet">•</span>{point}</div>
+                                                                            <div style={{ display: 'flex', gap: '6px' }}>
+                                                                                <button onClick={() => { setEditingDayPointIdx(pIdx); setEditingDayPointValue(point); }} className="premium-action-btn"><Edit2 size={14} /></button>
+                                                                                <button onClick={() => {
                                                                                     const points = (dayNoteText[activeDay] || '').split('\n');
                                                                                     points.splice(pIdx, 1);
                                                                                     setDayNoteText(prev => ({ ...prev, [activeDay]: points.join('\n') }));
-                                                                                }}
-                                                                                style={{ background: '#fff5f5', border: '1px solid #fed7d7', color: '#e53e3e', borderRadius: '6px', padding: '6px', cursor: 'pointer' }}
-                                                                            >
-                                                                                <Trash2 size={14} />
-                                                                            </button>
-                                                                        </div>
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        ))}
-                                                    </div>
+                                                                                }} className="premium-action-btn delete"><Trash2 size={14} /></button>
+                                                                            </div>
+                                                                        </>
+                                                                    )}
+                                                                </div>
+                                                            ))}
+                                                        </div>
 
-                                                    <div style={{ borderTop: '2px dashed #ffeeba', paddingTop: '20px' }}>
-                                                        <div style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#475569', marginBottom: '10px' }}>ADD NEW HIGHLIGHT POINT</div>
-                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                                        <div style={{ position: 'relative' }}>
                                                             <textarea
-                                                                placeholder="Type a new highlight or special note point here... (Press Enter to add)"
+                                                                placeholder="Add a new highlight or special instruction for this day..."
                                                                 value={newDayPoint}
                                                                 onChange={(e) => setNewDayPoint(e.target.value)}
                                                                 onKeyDown={(e) => {
@@ -1743,170 +1767,125 @@ function App() {
                                                                         if (!newDayPoint.trim()) return;
                                                                         setDayNoteText(prev => {
                                                                             const current = prev[activeDay] || '';
-                                                                            const updated = current ? current + '\n' + newDayPoint.trim() : newDayPoint.trim();
-                                                                            return { ...prev, [activeDay]: updated };
+                                                                            return { ...prev, [activeDay]: current ? current + '\n' + newDayPoint.trim() : newDayPoint.trim() };
                                                                         });
                                                                         setNewDayPoint('');
                                                                     }
                                                                 }}
-                                                                style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '2px solid #ffeeba', fontSize: '1.05rem', minHeight: '180px', background: 'white', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.03)', lineHeight: '1.6', resize: 'vertical' }}
+                                                                className="premium-textarea-input"
+                                                                style={{ minHeight: '100px' }}
                                                             />
-                                                            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                                                                <button
-                                                                    onClick={() => {
-                                                                        if (!newDayPoint.trim()) return;
-                                                                        setDayNoteText(prev => {
-                                                                            const current = prev[activeDay] || '';
-                                                                            const updated = current ? current + '\n' + newDayPoint.trim() : newDayPoint.trim();
-                                                                            return { ...prev, [activeDay]: updated };
-                                                                        });
-                                                                        setNewDayPoint('');
-                                                                    }}
-                                                                    className="btn btn-primary"
-                                                                    style={{ padding: '10px 24px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '8px', borderRadius: '8px' }}
-                                                                >
-                                                                    <Plus size={18} /> Add Point to Journey
-                                                                </button>
-                                                            </div>
+                                                            <button
+                                                                onClick={() => {
+                                                                    if (!newDayPoint.trim()) return;
+                                                                    setDayNoteText(prev => {
+                                                                        const current = prev[activeDay] || '';
+                                                                        return { ...prev, [activeDay]: current ? current + '\n' + newDayPoint.trim() : newDayPoint.trim() };
+                                                                    });
+                                                                    setNewDayPoint('');
+                                                                }}
+                                                                className="btn btn-primary"
+                                                                style={{ position: 'absolute', bottom: '10px', right: '10px', width: 'auto', padding: '6px 16px', fontSize: '0.85rem' }}
+                                                            >
+                                                                <Plus size={14} /> Add Point
+                                                            </button>
                                                         </div>
-                                                    </div>
-                                                </motion.div>
-                                            )}
-
-                                            <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'flex-end' }}>
-                                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 'bold', cursor: 'pointer', background: '#f8fafc', padding: '8px 15px', borderRadius: '10px', border: '1px solid #e2e8f0', width: 'fit-content' }}>
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={showCityNote[activeDay] || false}
-                                                        onChange={(e) => {
-                                                            const checked = e.target.checked;
-                                                            setShowCityNote(prev => ({ ...prev, [activeDay]: checked }));
-                                                            if (checked && activeDayCities.length > 0 && (selectedCityForNote[activeDay] == null)) {
-                                                                setSelectedCityForNote(prev => ({ ...prev, [activeDay]: 0 }));
-                                                            }
-                                                        }}
-                                                    />
-                                                    Add Special Note for City (Day {activeDay})?
-                                                </label>
-                                            </div>
-
-                                            {showCityNote[activeDay] && (
-                                                <motion.div
-                                                    initial={{ opacity: 0, y: -10 }}
-                                                    animate={{ opacity: 1, y: 0 }}
-                                                    style={{ marginBottom: '25px', padding: '20px', background: '#eef8ff', borderRadius: '12px', border: '1px solid #bfdbfe' }}
-                                                >
-                                                    {activeDayCities.length === 0 ? (
-                                                        <div style={{ fontSize: '0.85rem', color: '#1e3a8a' }}>Add at least one city to Day {activeDay} to write city-wise notes.</div>
-                                                    ) : (
-                                                        <>
-                                                            <div className="form-group" style={{ marginBottom: '12px' }}>
-                                                                <label style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#1e3a8a' }}>Select City</label>
-                                                                <select
-                                                                    className="modern-input"
-                                                                    value={selectedCityIndex}
-                                                                    onChange={(e) => {
-                                                                        setSelectedCityForNote(prev => ({ ...prev, [activeDay]: Number(e.target.value) }));
-                                                                        setEditingCityPointIdx(null);
-                                                                        setEditingCityPointValue('');
-                                                                        setNewCityPoint('');
-                                                                    }}
-                                                                >
-                                                                    {activeDayCities.map((cityItem, cityIdx) => {
-                                                                        const master = allPlaces.find(p => p.id === (cityItem.id || cityItem.cityId));
-                                                                        return (
-                                                                            <option key={`${cityItem.id || cityItem.cityId}-${cityIdx}`} value={cityIdx}>
-                                                                                {master?.name || cityItem.name || `City ${cityIdx + 1}`}
-                                                                            </option>
-                                                                        );
-                                                                    })}
-                                                                </select>
+                                                    </motion.div>
+                                                )}
+                                            </AnimatePresence>
+                                            <AnimatePresence>
+                                                {showCityNote[activeDay] && (
+                                                    <motion.div
+                                                        initial={{ opacity: 0, height: 0 }}
+                                                        animate={{ opacity: 1, height: 'auto' }}
+                                                        exit={{ opacity: 0, height: 0 }}
+                                                        className="note-builder-container city-note"
+                                                    >
+                                                        <div className="note-label-premium"><MapPin size={14} /> Local City Knowledge</div>
+                                                        
+                                                        {activeDayCities.length === 0 ? (
+                                                            <div style={{ fontSize: '0.9rem', color: '#1e3a8a', padding: '20px', textAlign: 'center', background: 'rgba(255,255,255,0.5)', borderRadius: '12px' }}>
+                                                                Add at least one city to Day {activeDay} to write city-specific tips.
                                                             </div>
+                                                        ) : (
+                                                            <>
+                                                                <div style={{ marginBottom: '20px' }}>
+                                                                    <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: '800', color: '#1e3a8a', textTransform: 'uppercase', marginBottom: '8px' }}>Select Target City</label>
+                                                                    <select
+                                                                        className="premium-select"
+                                                                        value={selectedCityIndex}
+                                                                        onChange={(e) => {
+                                                                            setSelectedCityForNote(prev => ({ ...prev, [activeDay]: Number(e.target.value) }));
+                                                                            setEditingCityPointIdx(null);
+                                                                            setNewCityPoint('');
+                                                                        }}
+                                                                        style={{ width: '100%', maxWidth: '300px' }}
+                                                                    >
+                                                                        {activeDayCities.map((cityItem, cityIdx) => {
+                                                                            const master = allPlaces.find(p => p.id === (cityItem.id || cityItem.cityId));
+                                                                            return (
+                                                                                <option key={`${cityItem.id || cityItem.cityId}-${cityIdx}`} value={cityIdx}>
+                                                                                    {master?.name || cityItem.name || `City ${cityIdx + 1}`}
+                                                                                </option>
+                                                                            );
+                                                                        })}
+                                                                    </select>
+                                                                </div>
 
-                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
-                                                                {(selectedCityNoteText || '').split('\n').filter(p => p.trim()).map((point, pIdx) => (
-                                                                    <div key={pIdx} style={{ background: 'white', padding: '10px 12px', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
-                                                                        {editingCityPointIdx === pIdx ? (
-                                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                                                                <textarea
-                                                                                    value={editingCityPointValue}
-                                                                                    onChange={(e) => setEditingCityPointValue(e.target.value)}
-                                                                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #93c5fd', minHeight: '90px', background: 'white' }}
-                                                                                />
-                                                                                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                                                                                    <button
-                                                                                        onClick={() => {
+                                                                <div className="points-list-premium">
+                                                                    {(selectedCityNoteText || '').split('\n').filter(p => p.trim()).map((point, pIdx) => (
+                                                                        <div key={pIdx} className="point-card-premium">
+                                                                            {editingCityPointIdx === pIdx ? (
+                                                                                <div style={{ width: '100%' }}>
+                                                                                    <textarea
+                                                                                        value={editingCityPointValue}
+                                                                                        onChange={(e) => setEditingCityPointValue(e.target.value)}
+                                                                                        className="premium-textarea-input"
+                                                                                        style={{ minHeight: '80px', marginBottom: '10px' }}
+                                                                                    />
+                                                                                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                                                                                        <button onClick={() => {
                                                                                             const points = (selectedCityNoteText || '').split('\n');
                                                                                             points[pIdx] = editingCityPointValue.trim();
-                                                                                            updateSelectedCityNote(points.filter(Boolean).join('\n'));
+                                                                                            updateSelectedCityNote(points.join('\n'));
                                                                                             setEditingCityPointIdx(null);
-                                                                                        }}
-                                                                                        className="btn btn-primary"
-                                                                                        style={{ padding: '8px 14px', fontSize: '0.82rem' }}
-                                                                                    >
-                                                                                        Save
-                                                                                    </button>
-                                                                                    <button
-                                                                                        onClick={() => setEditingCityPointIdx(null)}
-                                                                                        className="btn btn-outline"
-                                                                                        style={{ padding: '8px 14px', fontSize: '0.82rem' }}
-                                                                                    >
-                                                                                        Cancel
-                                                                                    </button>
+                                                                                        }} className="btn btn-primary btn-sm" style={{ width: 'auto' }}>Save</button>
+                                                                                        <button onClick={() => setEditingCityPointIdx(null)} className="btn btn-outline btn-sm" style={{ width: 'auto' }}>Cancel</button>
+                                                                                    </div>
                                                                                 </div>
-                                                                            </div>
-                                                                        ) : (
-                                                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                                                <span style={{ fontSize: '0.88rem', color: '#1e293b', flex: 1 }}>• {point}</span>
-                                                                                <div style={{ display: 'flex', gap: '6px' }}>
-                                                                                    <button
-                                                                                        onClick={() => {
-                                                                                            setEditingCityPointIdx(pIdx);
-                                                                                            setEditingCityPointValue(point);
-                                                                                        }}
-                                                                                        style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#64748b', borderRadius: '6px', padding: '6px', cursor: 'pointer' }}
-                                                                                    >
-                                                                                        <Edit2 size={13} />
-                                                                                    </button>
-                                                                                    <button
-                                                                                        onClick={() => {
+                                                                            ) : (
+                                                                                <>
+                                                                                    <div className="point-text"><span className="point-text-bullet">•</span>{point}</div>
+                                                                                    <div style={{ display: 'flex', gap: '6px' }}>
+                                                                                        <button onClick={() => { setEditingCityPointIdx(pIdx); setEditingCityPointValue(point); }} className="premium-action-btn"><Edit2 size={14} /></button>
+                                                                                        <button onClick={() => {
                                                                                             const points = (selectedCityNoteText || '').split('\n');
                                                                                             points.splice(pIdx, 1);
                                                                                             updateSelectedCityNote(points.join('\n'));
-                                                                                        }}
-                                                                                        style={{ background: '#fff5f5', border: '1px solid #fed7d7', color: '#e53e3e', borderRadius: '6px', padding: '6px', cursor: 'pointer' }}
-                                                                                    >
-                                                                                        <Trash2 size={13} />
-                                                                                    </button>
-                                                                                </div>
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-
-                                                            <div style={{ borderTop: '1px dashed #93c5fd', paddingTop: '14px' }}>
-                                                                <div style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#1e3a8a', marginBottom: '8px' }}>
-                                                                    Add New Point for {selectedCityMaster?.name || selectedCityItemForNote?.name || 'Selected City'}
+                                                                                        }} className="premium-action-btn delete"><Trash2 size={14} /></button>
+                                                                                    </div>
+                                                                                </>
+                                                                            )}
+                                                                        </div>
+                                                                    ))}
                                                                 </div>
-                                                                <textarea
-                                                                    placeholder="Type city-wise note point..."
-                                                                    value={newCityPoint}
-                                                                    onChange={(e) => setNewCityPoint(e.target.value)}
-                                                                    onKeyDown={(e) => {
-                                                                        if (e.key === 'Enter' && !e.shiftKey) {
-                                                                            e.preventDefault();
-                                                                            if (!newCityPoint.trim()) return;
-                                                                            updateSelectedCityNote((current) => {
-                                                                                const next = current ? `${current}\n${newCityPoint.trim()}` : newCityPoint.trim();
-                                                                                return next;
-                                                                            });
-                                                                            setNewCityPoint('');
-                                                                        }
-                                                                    }}
-                                                                    style={{ width: '100%', padding: '12px', borderRadius: '10px', border: '1px solid #93c5fd', fontSize: '0.95rem', minHeight: '120px', background: 'white', resize: 'vertical' }}
-                                                                />
-                                                                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
+
+                                                                <div style={{ position: 'relative' }}>
+                                                                    <textarea
+                                                                        placeholder={`Add a specific tip for ${selectedCityMaster?.name || 'this city'}...`}
+                                                                        value={newCityPoint}
+                                                                        onChange={(e) => setNewCityPoint(e.target.value)}
+                                                                        onKeyDown={(e) => {
+                                                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                                                                e.preventDefault();
+                                                                                if (!newCityPoint.trim()) return;
+                                                                                updateSelectedCityNote((current) => current ? `${current}\n${newCityPoint.trim()}` : newCityPoint.trim());
+                                                                                setNewCityPoint('');
+                                                                            }
+                                                                        }}
+                                                                        className="premium-textarea-input"
+                                                                        style={{ minHeight: '100px' }}
+                                                                    />
                                                                     <button
                                                                         onClick={() => {
                                                                             if (!newCityPoint.trim()) return;
@@ -1914,16 +1893,16 @@ function App() {
                                                                             setNewCityPoint('');
                                                                         }}
                                                                         className="btn btn-primary"
-                                                                        style={{ padding: '9px 16px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '6px' }}
+                                                                        style={{ position: 'absolute', bottom: '10px', right: '10px', width: 'auto', padding: '6px 16px', fontSize: '0.85rem' }}
                                                                     >
-                                                                        <Plus size={16} /> Add City Note Point
+                                                                        <Plus size={14} /> Add Tip
                                                                     </button>
                                                                 </div>
-                                                            </div>
-                                                        </>
-                                                    )}
-                                                </motion.div>
-                                            )}
+                                                            </>
+                                                        )}
+                                                    </motion.div>
+                                                )}
+                                            </AnimatePresence>
 
                                             {(itinerary[activeDay] || []).map((item, idx) => {
                                                 const place = allPlaces.find(p => p.id === (item.id || item.cityId));
@@ -2735,14 +2714,17 @@ function App() {
     );
 }
 
-const PDFPage = ({ children, pageNumber, totalPages, generationTime }) => (
-    <div className="pdf-page">
+const PDFPage = ({ children, pageNumber, totalPages, generationTime, footerExceptionApplied = false }) => (
+    <div
+        className="pdf-page"
+        data-footer-exception={footerExceptionApplied ? 'single-fit' : 'none'}
+    >
         <div className="pdf-page-border"></div>
         {generationTime && (
             <div style={{
                 position: 'absolute',
-                right: '25px',
-                top: '22px',
+                right: '10px',
+                top: '4px',
                 fontSize: '0.65rem',
                 opacity: 0.8,
                 fontStyle: 'italic',
@@ -2800,14 +2782,27 @@ const PDFContent = ({
 
     return (
         <div className="pdf-preview-container">
-            {pages.map((items, pageIndex) => (
+            {pages.map((pageData, pageIndex) => {
+                const items = Array.isArray(pageData)
+                    ? pageData
+                    : (Array.isArray(pageData?.items) ? pageData.items : []);
+                const shouldRenderHeader = typeof pageData?.showHeader === 'boolean'
+                    ? pageData.showHeader
+                    : pageIndex === 0;
+                const shouldRenderFooter = typeof pageData?.showFooter === 'boolean'
+                    ? pageData.showFooter
+                    : pageIndex === pages.length - 1;
+                const footerExceptionApplied = Boolean(pageData?.footerExceptionApplied);
+
+                return (
                 <div key={pageIndex}>
                     <PDFPage
                         pageNumber={pageIndex + 1}
                         totalPages={pages.length}
-                        generationTime={pageIndex === 0 ? generationTime : null}
+                        generationTime={generationTime}
+                        footerExceptionApplied={footerExceptionApplied}
                     >
-                        {pageIndex === 0 && (
+                        {shouldRenderHeader && (
                             <div className="pdf-fixed-header" data-pdf-role="header">
                                 <div className="pdf-header-premium">
                                 <div className="pdf-logo-wrapper">
@@ -3035,7 +3030,7 @@ const PDFContent = ({
                             </div>
                         </div>
 
-                        {pageIndex === pages.length - 1 && !includeRouteMapPage && (
+                        {shouldRenderFooter && (
                             <div className="pdf-footer-premium pdf-fixed-footer" data-pdf-role="footer">
                                 <div className="footer-top">
                                     <div className="footer-brand">
@@ -3065,7 +3060,8 @@ const PDFContent = ({
                         <div className="page-break-indicator">Next Page</div>
                     )}
                 </div>
-            ))}
+                );
+            })}
             {includeRouteMapPage && routeMapPlan && (
                 <div key="route-map-pdf-page">
                     <RouteMapPdfPage plan={routeMapPlan} showFooter />

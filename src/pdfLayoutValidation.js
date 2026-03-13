@@ -43,18 +43,26 @@ export const validatePdfLayout = (container) => {
         const header = page.querySelector('[data-pdf-role="header"]');
         const body = page.querySelector('[data-pdf-role="body"]');
         const footer = page.querySelector('[data-pdf-role="footer"]');
+        const footerExceptionTag = page.getAttribute('data-footer-exception');
 
         if (!border) errors.push(`Page ${pageIndex + 1}: missing page border`);
         if (!pageContent) errors.push(`Page ${pageIndex + 1}: missing page content area`);
         if (!body) errors.push(`Page ${pageIndex + 1}: missing body area`);
 
         const shouldHaveHeader = multiplePages ? pageIndex === 0 : true;
-        const shouldHaveFooter = multiplePages ? pageIndex === pages.length - 1 : true;
+        const shouldHaveFooter = multiplePages ? pageIndex === pages.length - 1 : footerExceptionTag !== 'single-fit';
         if (Boolean(header) !== shouldHaveHeader) {
             errors.push(`Page ${pageIndex + 1}: header placement rule failed`);
         }
         if (Boolean(footer) !== shouldHaveFooter) {
             errors.push(`Page ${pageIndex + 1}: footer placement rule failed`);
+        }
+
+        if (!multiplePages && footerExceptionTag === 'single-fit' && Boolean(footer)) {
+            errors.push(`Page ${pageIndex + 1}: invalid single-page footer exception`);
+        }
+        if (multiplePages && footerExceptionTag === 'single-fit') {
+            errors.push(`Page ${pageIndex + 1}: single-page footer exception used in multi-page PDF`);
         }
 
         if (!border || !pageContent) return;

@@ -6,8 +6,11 @@ import { TypeScriptPdfLayoutEngine } from './pdf-engine';
 
 export const CITY_PDF_CONTAINER_ID = 'hidden-city-pdf-content';
 
-const CityPdfPage = ({ children }) => (
-    <div className="pdf-page">
+const CityPdfPage = ({ children, footerExceptionApplied = false }) => (
+    <div
+        className="pdf-page"
+        data-footer-exception={footerExceptionApplied ? 'single-fit' : 'none'}
+    >
         <div className="pdf-page-border"></div>
         <div className="pdf-page-content">
             <div className="pdf-page-inner">
@@ -50,7 +53,11 @@ const paginateCityFlow = (flowItems) => {
     const getItemWeight = (item) => {
         if (item.type === 'city-head') return item.image2 ? 2.2 : 1.9;
         if (item.type === 'city-para') return Math.max(0.1, (item.text || '').length / 900);
-        if (item.type === 'city-point') return item.subDesc ? 0.26 : 0.18;
+        if (item.type === 'city-point') {
+            const pointLen = `${item.subName || ''} ${item.subDesc || ''}`.trim().length;
+            const estimatedLines = Math.max(1, Math.ceil(pointLen / 70));
+            return Math.max(0.34, 0.2 + (pointLen / 560) + (estimatedLines * 0.06));
+        }
         return 0.2;
     };
 
@@ -61,6 +68,7 @@ const paginateCityFlow = (flowItems) => {
         headerHeightMm: 52,
         footerHeightMm: 20,
         blockGapMm: 2,
+        footerVisibility: 'last-and-single',
     });
 
     const blocks = flowItems.map((item, index) => ({
@@ -75,20 +83,23 @@ const paginateCityFlow = (flowItems) => {
     try {
         plan = planner.layout(blocks);
     } catch (_err) {
-        return [flowItems];
+        return [{ items: flowItems, showHeader: true, showFooter: true, footerExceptionApplied: false }];
     }
     if (!plan.valid) {
-        return [flowItems];
+        return [{ items: flowItems, showHeader: true, showFooter: true, footerExceptionApplied: false }];
     }
 
     const itemById = new Map(flowItems.map((item, idx) => [`city-${idx}`, item]));
-    const pages = plan.pages.map((page) =>
-        page.blocks
+    const pages = plan.pages.map((page) => ({
+        items: page.blocks
             .map((b) => itemById.get(b.sourceId))
-            .filter(Boolean)
-    );
+            .filter(Boolean),
+        showHeader: page.showHeader,
+        showFooter: page.showFooter,
+        footerExceptionApplied: Boolean(page.footerExceptionApplied),
+    }));
 
-    return pages.length > 0 ? pages : [[]];
+    return pages.length > 0 ? pages : [{ items: [], showHeader: true, showFooter: true, footerExceptionApplied: false }];
 };
 
 const CityPdfHeader = () => (
@@ -149,8 +160,17 @@ export const CityPDFContent = ({ place }) => {
 
     return (
         <div className="pdf-preview-container">
-            {pages.map((pageItems, pageIndex) => {
-                const isLastPage = pageIndex === pages.length - 1;
+            {pages.map((pageData, pageIndex) => {
+                const pageItems = Array.isArray(pageData)
+                    ? pageData
+                    : (Array.isArray(pageData?.items) ? pageData.items : []);
+                const shouldRenderHeader = typeof pageData?.showHeader === 'boolean'
+                    ? pageData.showHeader
+                    : pageIndex === 0;
+                const shouldRenderFooter = typeof pageData?.showFooter === 'boolean'
+                    ? pageData.showFooter
+                    : pageIndex === pages.length - 1;
+                const footerExceptionApplied = Boolean(pageData?.footerExceptionApplied);
                 const headItem = pageItems.find(item => item.type === 'city-head');
                 const paragraphs = pageItems.filter(item => item.type === 'city-para').map(item => item.text);
                 const points = pageItems.filter(item => item.type === 'city-point');
@@ -158,8 +178,8 @@ export const CityPDFContent = ({ place }) => {
 
                 return (
                     <div key={`city-page-${pageIndex}`}>
-                        <CityPdfPage>
-                            {pageIndex === 0 && (
+                        <CityPdfPage footerExceptionApplied={footerExceptionApplied}>
+                            {shouldRenderHeader && (
                                 <div className="pdf-fixed-header city-pdf-fixed-header" data-pdf-role="header">
                                     <CityPdfHeader />
                                 </div>
@@ -232,7 +252,7 @@ export const CityPDFContent = ({ place }) => {
                                 </div>
                             </div>
 
-                            {isLastPage && (
+                            {shouldRenderFooter && (
                                 <div className="pdf-fixed-footer" data-pdf-role="footer">
                                     <CityPdfFooter />
                                 </div>
