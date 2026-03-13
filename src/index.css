@@ -784,7 +784,7 @@ header {
 .pdf-welcome-section {
     text-align: center;
     max-width: 650px;
-    margin: 0 auto 20px;
+    margin: -20px auto 15px;
     padding: 0 20px;
 }
 
