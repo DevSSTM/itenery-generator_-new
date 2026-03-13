@@ -23,6 +23,14 @@ const overlaps = (a, b, tolerance = 0.5) => (
     && a.bottom > b.top + tolerance
 );
 
+const outsideDistance = (inner, outer) => {
+    const left = Math.max(0, outer.left - inner.left);
+    const top = Math.max(0, outer.top - inner.top);
+    const right = Math.max(0, inner.right - outer.right);
+    const bottom = Math.max(0, inner.bottom - outer.bottom);
+    return Math.max(left, top, right, bottom);
+};
+
 export const validatePdfLayout = (container) => {
     const errors = [];
     if (!container) {
@@ -80,7 +88,8 @@ export const validatePdfLayout = (container) => {
         };
         expectedMargins.push(pageMargins);
 
-        if (!isInside(contentRect, borderRect)) {
+        // Tolerate tiny border-stroke / subpixel drift without weakening body overflow checks.
+        if (outsideDistance(contentRect, borderRect) > 2.5) {
             errors.push(`Page ${pageIndex + 1}: content area exceeds border area`);
         }
 
