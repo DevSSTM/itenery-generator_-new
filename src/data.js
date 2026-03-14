@@ -21,13 +21,7 @@ export const places = [
         image: 'https://images.unsplash.com/photo-1546708973-b339540b5162?auto=format&fit=crop&q=80&w=1000',
         subPlaces: [
             'Temple of Tooth',
-            'Ambacce gadladeniya and lankathilaka',
-            'peradeniya botanikal garden',
             'kandy view point',
-            'bahirawa kanda',
-            'knuckles',
-            'sembuwatta',
-            'st pauls church and anglican church'
         ]
     },
     {

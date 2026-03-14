@@ -20,6 +20,14 @@ const LOCAL_LOGIN_CREDENTIALS = {
     admin: 'admin',
     user: 'user',
 };
+const REMOVED_KANDY_SUB_PLACE_KEYS = new Set([
+    'ambacce gadladeniya and lankathilaka',
+    'peradeniya botanikal garden',
+    'bahirawa kanda',
+    'knuckles',
+    'sembuwatta',
+    'st pauls church and anglican church',
+]);
 
 const CARD_STYLES = [
     { bg: 'linear-gradient(135deg, #fff5f5 0%, #ffe3e3 100%)', border: '#fca5a5', accent: '#e53e3e' }, // Red
@@ -105,6 +113,14 @@ const normalizeSubPlaces = (rawSubPlaces) => {
         deduped.push(item);
     });
     return deduped;
+};
+
+const sanitizeLegacyKandySubPlaces = (placeId, rawSubPlaces) => {
+    const normalized = normalizeSubPlaces(rawSubPlaces);
+    if (String(placeId || '').toLowerCase() !== 'kandy') {
+        return normalized;
+    }
+    return normalized.filter((item) => !REMOVED_KANDY_SUB_PLACE_KEYS.has(String(item?.name || '').toLowerCase()));
 };
 
 const mergeSubPlacesByName = (...lists) => {
@@ -340,14 +356,14 @@ function App() {
 
                     destData.forEach(dbPlace => {
                         const seedPlace = places.find((p) => p.id === dbPlace.id);
-                        const dbSubPlaces = normalizeSubPlaces(dbPlace.sub_places);
-                        const backupSubPlaces = normalizeSubPlaces(backupMap[dbPlace.id]);
-                        const seedSubPlaces = normalizeSubPlaces(seedPlace?.subPlaces);
-                        const resolvedSubPlaces = mergeSubPlacesByName(
+                        const dbSubPlaces = sanitizeLegacyKandySubPlaces(dbPlace.id, dbPlace.sub_places);
+                        const backupSubPlaces = sanitizeLegacyKandySubPlaces(dbPlace.id, backupMap[dbPlace.id]);
+                        const seedSubPlaces = sanitizeLegacyKandySubPlaces(dbPlace.id, seedPlace?.subPlaces);
+                        const resolvedSubPlaces = sanitizeLegacyKandySubPlaces(dbPlace.id, mergeSubPlacesByName(
                             dbSubPlaces,
                             backupSubPlaces,
                             seedSubPlaces,
-                        );
+                        ));
 
                         const formattedPlace = {
                             ...dbPlace,
@@ -383,16 +399,21 @@ function App() {
                                 name: dbP.name || pl.name,
                                 title: dbP.title || pl.title,
                                 description: dbP.description || pl.description,
-                                subPlaces: dbP.subPlaces && dbP.subPlaces.length > 0 ? dbP.subPlaces : pl.subPlaces,
+                                subPlaces: (dbP.subPlaces && dbP.subPlaces.length > 0
+                                    ? sanitizeLegacyKandySubPlaces(pl.id, dbP.subPlaces)
+                                    : sanitizeLegacyKandySubPlaces(pl.id, pl.subPlaces)),
                                 image: dbP.image_url || pl.image,
                                 image2: dbP.image_url_2 || pl.image2,
                             };
                         }
-                        const seedSubPlaces = normalizeSubPlaces(pl.subPlaces);
+                        const seedSubPlaces = sanitizeLegacyKandySubPlaces(pl.id, pl.subPlaces);
                         if (seedSubPlaces.length > 0) {
                             nextBackupMap[pl.id] = seedSubPlaces;
                         }
-                        return pl;
+                        return {
+                            ...pl,
+                            subPlaces: seedSubPlaces,
+                        };
                     }));
 
                     if (newCustomPlaces.length > 0) {
@@ -443,15 +464,20 @@ function App() {
 
     const [placesList, setPlacesList] = useState(() => {
         return places.map(p => {
+            const cleanedSubPlaces = sanitizeLegacyKandySubPlaces(p.id, p.subPlaces);
             const galleryImages = galleryDataRaw[p.id] || [];
             if (galleryImages.length > 0) {
                 return {
                     ...p,
+                    subPlaces: cleanedSubPlaces,
                     image: galleryImages[0],
                     image2: galleryImages.length > 1 ? galleryImages[1] : null
                 };
             }
-            return p;
+            return {
+                ...p,
+                subPlaces: cleanedSubPlaces,
+            };
         });
     });
     const [newPlace, setNewPlace] = useState({
@@ -976,8 +1002,14 @@ function App() {
             const dayPlaces = itinerary[d] || [];
             dayPlaces.forEach(item => {
                 const placeMaster = allPlaces.find((p) => p.id === (item.id || item.cityId));
-                const mergedCitySubPlaces = mergeSubPlacesByName(item.subPlaces, placeMaster?.subPlaces);
-                const enrichedSelectedSubPlaces = hydrateSelectedSubPlaces(item.selectedSubPlaces, mergedCitySubPlaces);
+                const mergedCitySubPlaces = sanitizeLegacyKandySubPlaces(
+                    item.id || item.cityId,
+                    mergeSubPlacesByName(item.subPlaces, placeMaster?.subPlaces)
+                );
+                const enrichedSelectedSubPlaces = sanitizeLegacyKandySubPlaces(
+                    item.id || item.cityId,
+                    hydrateSelectedSubPlaces(item.selectedSubPlaces, mergedCitySubPlaces)
+                );
                 // We split into Head (Header+Images) and Content (Description+Highlights)
                 // This allows a city's text to wrap to the next page while keeping images on the first page
                 flowItems.push({
