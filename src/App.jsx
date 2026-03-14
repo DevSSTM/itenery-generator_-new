@@ -619,6 +619,34 @@ function App() {
         Boolean(tripStart.trim()) &&
         Boolean(tripEnd.trim());
 
+    const getSetupMissingFields = () => {
+        const missing = [];
+        if (useTravelDates) {
+            if (!arrivalDate) missing.push('Arrival Date');
+            if (!departureDate) missing.push('Departure Date');
+        } else {
+            if (!manualDaysValid) missing.push('Number of Days');
+            if (!manualNightsValid) missing.push('Number of Nights');
+        }
+        if (!tripStart.trim()) missing.push('Trip Start Point');
+        if (!tripEnd.trim()) missing.push('Trip End Point');
+        return missing;
+    };
+
+    const handleStartBuildingClick = () => {
+        const missing = getSetupMissingFields();
+        if (missing.length > 0) {
+            showSystemPopup({
+                title: 'Missing Required Fields',
+                message: 'Please fill all required trip setup fields before continuing.',
+                details: `Required: ${missing.join(', ')}`,
+                tone: 'warning',
+            });
+            return;
+        }
+        setCurrentStep(3);
+    };
+
     const togglePlace = (place) => {
         setItinerary(prev => {
             const currentDayPlaces = prev[activeDay] || [];
@@ -1701,11 +1729,8 @@ function App() {
                                         </button>
                                         <button
                                             className="btn btn-primary"
-                                            disabled={!canStartBuilding}
-                                            onClick={() => {
-                                                if (!canStartBuilding) return;
-                                                setCurrentStep(3);
-                                            }}
+                                            type="button"
+                                            onClick={handleStartBuildingClick}
                                             style={{ padding: '12px 30px' }}
                                         >
                                             Start Building Itinerary <Compass size={18} style={{ marginLeft: '8px' }} />
