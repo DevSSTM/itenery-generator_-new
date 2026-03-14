@@ -611,6 +611,7 @@ function App() {
 
     const manualDaysValid = Number.isFinite(Number(manualDaysCount)) && Number(manualDaysCount) >= 1;
     const manualNightsValid = Number.isFinite(Number(manualNightsCount)) && Number(manualNightsCount) >= 0;
+    const allPlaces = [...placesList, ...userPlaces];
 
     const canStartBuilding =
         (useTravelDates
@@ -960,8 +961,6 @@ function App() {
     };
 
     const currentGallery = editingPlaceId ? (placesGallery[editingPlaceId] || []) : [];
-
-    const allPlaces = [...placesList, ...userPlaces];
     const getEffectiveDescription = (placeItem) => {
         const altText = (placeItem?.alternativeDescription || '').trim();
         if (placeItem?.activeDescriptionSource === 'alternative' && altText) {
