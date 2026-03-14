@@ -315,7 +315,7 @@ export class TypeScriptPdfLayoutEngine {
             return pages;
         }
 
-        return pages.map((page, idx) => {
+        const finalized = pages.map((page, idx) => {
             const role: PageRole = idx === 0 ? 'first' : (idx === pages.length - 1 ? 'last' : 'middle');
             const capacity = this.bodyCapacityForRole(role);
             const used = sumHeights(page.blocks, this.template.blockGapMm);
@@ -330,6 +330,73 @@ export class TypeScriptPdfLayoutEngine {
                 freeBodyMm: capacity - used,
             };
         });
+
+        const overflowExists = finalized.some((p) => p.usedBodyMm - p.bodyCapacityMm > EPSILON);
+        if (!overflowExists) return finalized;
+
+        // Repack with true final roles to avoid "late" overflow after footer is introduced on the last page.
+        const orderedBlocks = finalized.flatMap((p) => p.blocks);
+        return this.repackPlacedBlocksForFinalRoles(orderedBlocks, Math.max(2, finalized.length));
+    }
+
+    private repackPlacedBlocksForFinalRoles(orderedBlocks: PlacedBlock[], startPageCount: number): PlannedPage[] {
+        if (orderedBlocks.length === 0) {
+            return [this.createEmptyPage(1, 'single')];
+        }
+
+        const maxPages = orderedBlocks.length + 1;
+        for (let targetPages = Math.max(2, startPageCount); targetPages <= maxPages; targetPages += 1) {
+            const pages: PlannedPage[] = [];
+            let blockIndex = 0;
+            let failed = false;
+
+            for (let pageIndex = 0; pageIndex < targetPages && blockIndex < orderedBlocks.length; pageIndex += 1) {
+                const role: PageRole = pageIndex === 0 ? 'first' : (pageIndex === targetPages - 1 ? 'last' : 'middle');
+                const page = this.createEmptyPage(pageIndex + 1, role);
+                pages.push(page);
+
+                while (blockIndex < orderedBlocks.length) {
+                    const candidate = orderedBlocks[blockIndex];
+                    const gap = page.blocks.length > 0 ? this.template.blockGapMm : 0;
+                    const remaining = page.bodyCapacityMm - page.usedBodyMm - gap;
+
+                    if (candidate.heightMm <= remaining + EPSILON) {
+                        page.blocks.push({ ...candidate });
+                        page.usedBodyMm = sumHeights(page.blocks, this.template.blockGapMm);
+                        page.freeBodyMm = page.bodyCapacityMm - page.usedBodyMm;
+                        blockIndex += 1;
+                        continue;
+                    }
+                    break;
+                }
+
+                if (page.blocks.length === 0) {
+                    failed = true;
+                    break;
+                }
+            }
+
+            if (failed) continue;
+            if (blockIndex < orderedBlocks.length) continue;
+
+            return pages.map((page, idx) => {
+                const role: PageRole = idx === 0 ? 'first' : (idx === pages.length - 1 ? 'last' : 'middle');
+                const capacity = this.bodyCapacityForRole(role);
+                const used = sumHeights(page.blocks, this.template.blockGapMm);
+                return {
+                    ...page,
+                    role,
+                    showHeader: this.showHeaderForRole(role),
+                    showFooter: this.showFooterForRole(role),
+                    footerExceptionApplied: false,
+                    bodyCapacityMm: capacity,
+                    usedBodyMm: used,
+                    freeBodyMm: capacity - used,
+                };
+            });
+        }
+
+        throw new Error('Unable to repack blocks into valid first/middle/last page capacities');
     }
 
     private tryPlaceBlock(page: PlannedPage, block: ContentBlock): boolean {
