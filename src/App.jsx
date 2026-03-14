@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { createRoot } from 'react-dom/client';
 import { places } from './data';
 import { Download, Eye, X, Check, MapPin, Calendar, User, Image as ImageIcon, Edit2, Trash2, Plus, Plane, Camera, Palmtree, Compass, Cloud, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -11,6 +12,7 @@ import RouteMapPlanner, { hasRenderableRouteMapPlan } from './components/RouteMa
 import { TypeScriptPdfLayoutEngine } from './pdf-engine';
 import ItineraryPDFContent, { generateItineraryPdf } from './itineraryPdf';
 import { ensurePdfLayoutValid } from './pdfLayoutValidation';
+import { ItineraryPdfBlock } from './itineraryPdfBlocks';
 
 const ROUTE_MAP_SNAPSHOT_KEY = 'route_map_saved_snapshot_v1';
 const LOGIN_ROLE_KEY = 'itinerary_login_role_v1';
@@ -203,7 +205,6 @@ function App() {
     const [isGenerating, setIsGenerating] = useState(false);
     const [isGeneratingCityPdf, setIsGeneratingCityPdf] = useState(false);
     const [isPreparingPreview, setIsPreparingPreview] = useState(false);
-    const [itineraryPdfScale, setItineraryPdfScale] = useState(1);
     const [systemPopup, setSystemPopup] = useState({
         open: false,
         title: '',
@@ -994,208 +995,277 @@ function App() {
         }
         return placeItem?.description || '';
     };
-    const paginatePlaces = () => {
-        const flowItems = [];
-        const safeScale = Math.max(1, Number(itineraryPdfScale) || 1);
+    const [pagesData, setPagesData] = useState([]);
+
+    const waitForRenderTick = (ms = 80) => new Promise((resolve) => setTimeout(resolve, ms));
+    const waitForNextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
+
+    const ensureMeasureHost = () => {
+        let host = document.getElementById('pdf-layout-measure-host');
+        if (host) return host;
+        host = document.createElement('div');
+        host.id = 'pdf-layout-measure-host';
+        host.style.position = 'fixed';
+        host.style.left = '-10000px';
+        host.style.top = '0';
+        host.style.width = '794px';
+        host.style.visibility = 'hidden';
+        host.style.pointerEvents = 'none';
+        host.style.zIndex = '-1';
+        document.body.appendChild(host);
+        return host;
+    };
+
+    const createProbePage = (showHeader, showFooter) => {
+        const page = document.createElement('div');
+        page.className = 'pdf-page';
+        page.innerHTML = `
+            <div class="pdf-page-border"></div>
+            <div class="pdf-page-content">
+                <div class="pdf-page-inner">
+                    ${showHeader ? '<div class="pdf-fixed-header" data-pdf-role="header"></div>' : ''}
+                    <div class="pdf-fixed-content" data-pdf-role="body"></div>
+                    ${showFooter ? '<div class="pdf-fixed-footer" data-pdf-role="footer"></div>' : ''}
+                </div>
+            </div>
+        `;
+        return page;
+    };
+
+    const getLayoutMetrics = () => {
+        const host = ensureMeasureHost();
+        const variants = {
+            first: createProbePage(true, false),
+            middle: createProbePage(false, false),
+            last: createProbePage(false, true),
+            singleWithFooter: createProbePage(true, true),
+            singleNoFooter: createProbePage(true, false),
+        };
+        Object.values(variants).forEach((node) => host.appendChild(node));
+
+        const measureVariant = (node) => {
+            const page = node.querySelector('.pdf-page') || node;
+            const body = node.querySelector('[data-pdf-role="body"]');
+            const pageRect = page.getBoundingClientRect();
+            const bodyRect = body.getBoundingClientRect();
+            return {
+                pageHeightPx: pageRect.height || 1123,
+                bodyWidthPx: bodyRect.width || 688,
+                bodyHeightPx: bodyRect.height || 780,
+            };
+        };
+
+        const first = measureVariant(variants.first);
+        const middle = measureVariant(variants.middle);
+        const last = measureVariant(variants.last);
+        const singleWithFooter = measureVariant(variants.singleWithFooter);
+        const singleNoFooter = measureVariant(variants.singleNoFooter);
+
+        Object.values(variants).forEach((node) => node.remove());
+
+        return {
+            pageHeightPx: first.pageHeightPx,
+            bodyWidthPx: first.bodyWidthPx,
+            firstBodyPx: first.bodyHeightPx,
+            middleBodyPx: middle.bodyHeightPx,
+            lastBodyPx: last.bodyHeightPx,
+            singleWithFooterPx: singleWithFooter.bodyHeightPx,
+            singleNoFooterPx: singleNoFooter.bodyHeightPx,
+        };
+    };
+
+    const buildMeasuredBlocks = () => {
+        const blocks = [];
 
         for (let d = 1; d <= numDays; d++) {
             const dayPlaces = itinerary[d] || [];
-            dayPlaces.forEach(item => {
+            let dayLabelUsed = false;
+
+            dayPlaces.forEach((item, cityIdx) => {
                 const placeMaster = allPlaces.find((p) => p.id === (item.id || item.cityId));
                 const mergedCitySubPlaces = sanitizeLegacyKandySubPlaces(
                     item.id || item.cityId,
                     mergeSubPlacesByName(item.subPlaces, placeMaster?.subPlaces)
                 );
-                const enrichedSelectedSubPlaces = sanitizeLegacyKandySubPlaces(
+                const highlights = sanitizeLegacyKandySubPlaces(
                     item.id || item.cityId,
                     hydrateSelectedSubPlaces(item.selectedSubPlaces, mergedCitySubPlaces)
                 );
-                // We split into Head (Header+Images) and Content (Description+Highlights)
-                // This allows a city's text to wrap to the next page while keeping images on the first page
-                flowItems.push({
-                    type: 'dest-head',
-                    ...item,
+                const paragraphs = getEffectiveDescription(item).split('\n').map((p) => p.trim()).filter(Boolean);
+                const cityNotes = (item.citySpecialNote || '').split('\n').map((line) => line.trim()).filter(Boolean);
+
+                const introParagraphs = paragraphs.length > 0 ? [paragraphs[0]] : [];
+                const paragraphRemainder = paragraphs.slice(introParagraphs.length);
+                const introHighlights = introParagraphs.length === 0 && highlights.length > 0 ? [highlights[0]] : [];
+                const highlightRemainder = highlights.slice(introHighlights.length);
+                const introNotes = introParagraphs.length === 0 && introHighlights.length === 0 && cityNotes.length > 0 ? [cityNotes[0]] : [];
+                const noteRemainder = cityNotes.slice(introNotes.length);
+
+                blocks.push({
+                    id: `day-${d}-city-${cityIdx}-intro`,
+                    type: 'city',
                     day: d,
-                    destId: item.id
+                    showDayLabel: !dayLabelUsed,
+                    showHeading: true,
+                    cityName: item.name,
+                    cityTitle: item.title,
+                    image: customImages[item.id] || item.image,
+                    image2: customImages[`${item.id}-2`] || item.image2,
+                    paragraphs: introParagraphs,
+                    highlights: introHighlights,
+                    cityNotes: introNotes,
                 });
+                dayLabelUsed = true;
 
-                const paragraphs = getEffectiveDescription(item).split('\n').filter(p => p.trim());
-                paragraphs.forEach((p, pIdx) => {
-                    flowItems.push({
-                        type: 'dest-para',
-                        text: p,
+                paragraphRemainder.forEach((para, idx) => {
+                    blocks.push({
+                        id: `day-${d}-city-${cityIdx}-para-${idx}`,
+                        type: 'city',
                         day: d,
-                        destId: item.id,
-                        name: item.name
+                        showDayLabel: false,
+                        showHeading: false,
+                        cityName: item.name,
+                        cityTitle: item.title,
+                        image: '',
+                        image2: '',
+                        paragraphs: [para],
+                        highlights: [],
+                        cityNotes: [],
                     });
                 });
 
-                if (enrichedSelectedSubPlaces.length > 0) {
-                    enrichedSelectedSubPlaces.forEach((sub, subIdx) => {
-                        flowItems.push({
-                            type: 'dest-highlight-point',
-                            highlight: sub,
-                            isFirst: subIdx === 0,
-                            isLast: subIdx === enrichedSelectedSubPlaces.length - 1,
-                            day: d,
-                            destId: item.id,
-                            name: item.name
-                        });
+                highlightRemainder.forEach((sub, idx) => {
+                    blocks.push({
+                        id: `day-${d}-city-${cityIdx}-highlight-${idx}`,
+                        type: 'city',
+                        day: d,
+                        showDayLabel: false,
+                        showHeading: false,
+                        cityName: item.name,
+                        cityTitle: item.title,
+                        image: '',
+                        image2: '',
+                        paragraphs: [],
+                        highlights: [sub],
+                        cityNotes: [],
                     });
-                }
+                });
 
-                if ((item.citySpecialNote || '').trim()) {
-                    const cityNoteLines = item.citySpecialNote
-                        .split('\n')
-                        .map((line) => line.trim())
-                        .filter(Boolean);
-                    cityNoteLines.forEach((line, lineIdx) => {
-                        flowItems.push({
-                            type: 'city-note-point',
-                            text: line,
-                            isFirst: lineIdx === 0,
-                            isLast: lineIdx === cityNoteLines.length - 1,
-                            day: d,
-                            destId: item.id,
-                            name: item.name
-                        });
+                noteRemainder.forEach((line, idx) => {
+                    blocks.push({
+                        id: `day-${d}-city-${cityIdx}-note-${idx}`,
+                        type: 'city',
+                        day: d,
+                        showDayLabel: false,
+                        showHeading: false,
+                        cityName: item.name,
+                        cityTitle: item.title,
+                        image: '',
+                        image2: '',
+                        paragraphs: [],
+                        highlights: [],
+                        cityNotes: [line],
                     });
-                }
+                });
             });
 
             if (showDayNote[d] && dayNoteText[d]) {
-                flowItems.push({ day: d, text: dayNoteText[d], type: 'dayNote', id: `day-note-${d}` });
+                const lines = dayNoteText[d].split('\n').map((line) => line.trim()).filter(Boolean);
+                if (lines.length > 0) {
+                    blocks.push({
+                        id: `day-${d}-note`,
+                        type: 'dayNote',
+                        day: d,
+                        lines,
+                    });
+                }
             }
         }
 
-        const getItemWeight = (item) => {
-            let weight = 0;
-            if (item.type === 'dayNote') {
-                const linesRaw = (item.text || '').split('\n').filter(l => l.trim());
-                weight = 0.42 + (linesRaw.length * 0.16);
-            } else if (item.type === 'dest-head') {
-                weight = 1.08;
-                if (item.image2) weight += 0.18;
-            } else if (item.type === 'dest-para') {
-                weight = Math.max(0.06, (item.text || '').length / 1200);
-            } else if (item.type === 'dest-highlight-point') {
-                const sub = item.highlight;
-                const subName = typeof sub === 'string' ? sub : (sub?.name || '');
-                const subDesc = typeof sub === 'string' ? '' : (sub?.description || '');
-                const pointLen = (subName + ' ' + subDesc).trim().length;
-                const estimatedLines = Math.max(1, Math.ceil(pointLen / 68));
-                weight = Math.max(0.38, 0.22 + (pointLen / 520) + (estimatedLines * 0.09));
-            } else if (item.type === 'city-note-point') {
-                const noteLen = (item.text || '').trim().length;
-                // First city-note line also carries the visual box title/container overhead.
-                if (item.isFirst) {
-                    const estimatedLines = Math.max(1, Math.ceil(noteLen / 70));
-                    weight = Math.max(0.56, 0.34 + (noteLen / 460) + (estimatedLines * 0.08));
-                } else {
-                    const estimatedLines = Math.max(1, Math.ceil(noteLen / 70));
-                    weight = Math.max(0.34, 0.2 + (noteLen / 560) + (estimatedLines * 0.05));
-                }
-            }
-            return weight;
-        };
+        return blocks;
+    };
 
-        const MM_PER_WEIGHT = 46;
-        const FIRST_PAGE_WELCOME_RESERVE_MM = 20;
-        const ENTRY_GAP_MM = 2;
-        const FOOTER_SAFETY_CLEARANCE_MM = 2;
+    const measureBlockHeightMm = async (block, bodyWidthPx, pageHeightPx) => {
+        const host = ensureMeasureHost();
+        const wrapper = document.createElement('div');
+        wrapper.style.width = `${Math.max(1, Math.floor(bodyWidthPx))}px`;
+        wrapper.style.display = 'block';
+        wrapper.style.padding = '0';
+        wrapper.style.margin = '0';
+        host.appendChild(wrapper);
+        const root = createRoot(wrapper);
+        root.render(<ItineraryPdfBlock block={block} />);
+        await waitForNextFrame();
+        await waitForFontsAndImages(wrapper);
+        const px = wrapper.getBoundingClientRect().height;
+        root.unmount();
+        wrapper.remove();
+        return (px / pageHeightPx) * 297;
+    };
+
+    const planItineraryPages = React.useCallback(async (heightInflation = 1.0) => {
+        const rawBlocks = buildMeasuredBlocks();
+        if (rawBlocks.length === 0) {
+            return [{ blocks: [], showHeader: true, showFooter: true, footerExceptionApplied: false }];
+        }
+
+        const metrics = getLayoutMetrics();
         const planner = new TypeScriptPdfLayoutEngine({
             page: { width: 210, height: 297 },
-            margins: { top: 5, right: 5, bottom: 2, left: 5 },
+            margins: { top: 5, right: 5, bottom: 5, left: 5 },
             headerHeightMm: 52,
-            // Reserve 2mm safety clearance above the visible footer area.
-            footerHeightMm: 20 + FOOTER_SAFETY_CLEARANCE_MM,
-            blockGapMm: ENTRY_GAP_MM,
+            footerHeightMm: 20,
+            blockGapMm: 2,
+            bottomSafetyMm: 2,
             footerVisibility: 'last-and-single',
         });
 
-        const entries = [];
-        for (let i = 0; i < flowItems.length; i++) {
-            const current = flowItems[i];
-            const next = flowItems[i + 1];
+        const welcomeReservePx = Math.max(0, metrics.singleNoFooterPx - metrics.firstBodyPx);
+        const welcomeReserveMm = (welcomeReservePx / metrics.pageHeightPx) * 297;
+        const measuredBlocks = [];
 
-            const canPairHead =
-                current.type === 'dest-head'
-                && next
-                && next.destId === current.destId
-                && next.type === 'dest-para';
-
-            if (canPairHead) {
-                const pairWeight = getItemWeight(current) + getItemWeight(next);
-                entries.push({
-                    id: `entry-${i}`,
-                    itemIndexes: [i, i + 1],
-                    heightMm: Math.max(12, (pairWeight * MM_PER_WEIGHT * safeScale) + ENTRY_GAP_MM),
-                    keepTogether: true,
-                });
-                i += 1;
-                continue;
-            }
-
-            entries.push({
-                id: `entry-${i}`,
-                itemIndexes: [i],
-                heightMm: Math.max(8, getItemWeight(current) * MM_PER_WEIGHT * safeScale),
-                keepTogether: true,
+        for (const block of rawBlocks) {
+            const measuredMm = await measureBlockHeightMm(block, metrics.bodyWidthPx, metrics.pageHeightPx);
+            measuredBlocks.push({
+                id: block.id,
+                block,
+                heightMm: Math.max(4, measuredMm * heightInflation),
             });
         }
 
-        const blocks = [
+        const plan = planner.layout([
             {
                 id: 'engine-first-page-reserve',
-                heightMm: FIRST_PAGE_WELCOME_RESERVE_MM,
+                heightMm: Math.max(0, welcomeReserveMm),
                 keepTogether: true,
                 splittable: false,
             },
-            ...entries.map((entry) => ({
+            ...measuredBlocks.map((entry) => ({
                 id: entry.id,
                 heightMm: entry.heightMm,
-                forcePageBreak: entry.forcePageBreak === true,
-                keepTogether: entry.keepTogether,
+                keepTogether: true,
                 splittable: false,
             })),
-        ];
+        ]);
 
-        let plan;
-        try {
-            plan = planner.layout(blocks);
-        } catch (_err) {
-            return [{ items: flowItems, showHeader: true, showFooter: true, footerExceptionApplied: false }];
-        }
         if (!plan.valid) {
-            return [{ items: flowItems, showHeader: true, showFooter: true, footerExceptionApplied: false }];
+            throw new Error(plan.errors.join(' | ') || 'Measured layout plan failed');
         }
 
-        const entryById = new Map(entries.map((entry) => [entry.id, entry]));
-        const pages = plan.pages.map((page) => {
-            const pageItems = [];
-            page.blocks.forEach((block) => {
-                if (block.sourceId === 'engine-first-page-reserve') return;
-                const entry = entryById.get(block.sourceId);
-                if (!entry) return;
-                entry.itemIndexes.forEach((idx) => {
-                    const item = flowItems[idx];
-                    if (item) pageItems.push(item);
-                });
-            });
-            return {
-                items: pageItems,
-                showHeader: page.showHeader,
-                showFooter: page.showFooter,
-                footerExceptionApplied: Boolean(page.footerExceptionApplied),
-            };
-        });
+        const byId = new Map(measuredBlocks.map((entry) => [entry.id, entry.block]));
+        const pages = plan.pages.map((page) => ({
+            blocks: page.blocks
+                .filter((b) => b.sourceId !== 'engine-first-page-reserve')
+                .map((b) => byId.get(b.sourceId))
+                .filter(Boolean),
+            showHeader: page.showHeader,
+            showFooter: page.showFooter,
+            footerExceptionApplied: Boolean(page.footerExceptionApplied),
+        }));
 
-        return pages.length > 0 ? pages : [{ items: [], showHeader: true, showFooter: true, footerExceptionApplied: false }];
-    };
+        return pages.length > 0 ? pages : [{ blocks: [], showHeader: true, showFooter: true, footerExceptionApplied: false }];
+    }, [allPlaces, customImages, dayNoteText, itinerary, numDays, showDayNote]);
 
-    const pagesData = paginatePlaces();
-    const [isPdfReady, setIsPdfReady] = useState(false);
-    const waitForRenderTick = (ms = 180) => new Promise((resolve) => setTimeout(resolve, ms));
     const waitForFontsAndImages = async (container) => {
         if (typeof document !== 'undefined' && document.fonts?.ready) {
             try {
@@ -1220,22 +1290,15 @@ function App() {
     const openPreviewWithValidation = async () => {
         if (isPreparingPreview || isGenerating) return;
         setIsPreparingPreview(true);
-        let scale = 1;
         let passed = false;
         let lastError = null;
 
         try {
-            if (itineraryPdfScale !== 1) {
-                setItineraryPdfScale(1);
-            }
-            await waitForRenderTick(240);
-
-            for (let attempt = 0; attempt < 10; attempt++) {
-                if (attempt > 0) {
-                    scale = Number((scale * 1.05).toFixed(3));
-                    setItineraryPdfScale(scale);
-                    await waitForRenderTick(260);
-                }
+            for (let attempt = 0; attempt < 4; attempt++) {
+                const inflation = 1 + (attempt * 0.06);
+                const planned = await planItineraryPages(inflation);
+                setPagesData(planned);
+                await waitForRenderTick(220);
 
                 const container = document.getElementById('hidden-pdf-content');
                 if (!container) {
@@ -1270,7 +1333,7 @@ function App() {
                 tone: 'error',
             });
         } finally {
-            setItineraryPdfScale(passed ? scale : 1);
+            if (!passed) setPagesData([]);
             setIsPreparingPreview(false);
         }
     };
@@ -1292,19 +1355,12 @@ function App() {
         // Higher delay to ensure all dynamic content and images are fully rendered
         setTimeout(async () => {
             try {
-                let scale = 1;
                 let lastError = null;
-                if (itineraryPdfScale !== 1) {
-                    setItineraryPdfScale(1);
-                    await waitForRenderTick(220);
-                }
-
-                for (let attempt = 0; attempt < 10; attempt++) {
-                    if (attempt > 0) {
-                        scale = Number((scale * 1.05).toFixed(3));
-                        setItineraryPdfScale(scale);
-                        await waitForRenderTick(220);
-                    }
+                for (let attempt = 0; attempt < 4; attempt++) {
+                    const inflation = 1 + (attempt * 0.06);
+                    const planned = await planItineraryPages(inflation);
+                    setPagesData(planned);
+                    await waitForRenderTick(200);
 
                     try {
                         const result = await generateItineraryPdf({
@@ -1335,7 +1391,6 @@ function App() {
                             return;
                         }
 
-                        setItineraryPdfScale(scale);
                         return;
                     } catch (attemptError) {
                         lastError = attemptError;
@@ -1363,9 +1418,6 @@ function App() {
                     tone: 'error',
                 });
             } finally {
-                if (!showPreview) {
-                    setItineraryPdfScale(1);
-                }
                 setIsGenerating(false);
             }
         }, 1500);

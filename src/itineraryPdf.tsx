@@ -4,6 +4,7 @@ import jsPDF from 'jspdf';
 import { MapPin, Globe, Phone } from 'lucide-react';
 import { RouteMapPdfPage } from './components/RouteMapPlanner';
 import { ensurePdfLayoutValid } from './pdfLayoutValidation';
+import { ItineraryPdfBlock } from './itineraryPdfBlocks';
 
 type AnyRecord = Record<string, any>;
 
@@ -131,6 +132,7 @@ export const ItineraryPDFContent = ({
                 const items = Array.isArray(pageData)
                     ? pageData
                     : (Array.isArray(pageDataObj?.items) ? pageDataObj.items : []);
+                const blocks = Array.isArray(pageDataObj?.blocks) ? pageDataObj.blocks : null;
                 const shouldRenderHeader = typeof pageDataObj?.showHeader === 'boolean'
                     ? pageDataObj.showHeader
                     : pageIndex === 0;
@@ -226,7 +228,9 @@ export const ItineraryPDFContent = ({
                                 )}
 
                                 <div className="pdf-itinerary-list">
-                                    {(() => {
+                                    {blocks ? blocks.map((block: AnyRecord, idx: number) => (
+                                        <ItineraryPdfBlock key={block.id || `${pageIndex}-block-${idx}`} block={block} />
+                                    )) : (() => {
                                         const grouped: AnyRecord[] = [];
                                         let currentGroup: AnyRecord | null = null;
 

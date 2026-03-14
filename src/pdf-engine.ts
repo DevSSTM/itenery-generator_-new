@@ -18,6 +18,7 @@ export interface PdfLayoutTemplate {
     headerHeightMm: number;
     footerHeightMm: number;
     blockGapMm: number;
+    bottomSafetyMm?: number;
     headerVisibility?: 'first-and-single' | 'every-page' | 'none';
     footerVisibility?: 'last-and-single' | 'every-page' | 'none';
 }
@@ -353,14 +354,16 @@ export class TypeScriptPdfLayoutEngine {
         const printableHeight = this.template.page.height - this.template.margins.top - this.template.margins.bottom;
         const header = this.showHeaderForRole(role) ? this.template.headerHeightMm : 0;
         const footer = this.showFooterForRole(role) ? this.template.footerHeightMm : 0;
-        return printableHeight - header - footer;
+        const safety = this.template.bottomSafetyMm ?? 0;
+        return printableHeight - header - footer - safety;
     }
 
     private bodyCapacityForSingle(showFooter: boolean): number {
         const printableHeight = this.template.page.height - this.template.margins.top - this.template.margins.bottom;
         const header = this.showHeaderForRole('single') ? this.template.headerHeightMm : 0;
         const footer = showFooter ? this.template.footerHeightMm : 0;
-        return printableHeight - header - footer;
+        const safety = this.template.bottomSafetyMm ?? 0;
+        return printableHeight - header - footer - safety;
     }
 
     private showHeaderForRole(role: PageRole): boolean {
@@ -434,6 +437,7 @@ export const DEFAULT_A4_TEMPLATE: PdfLayoutTemplate = {
     headerHeightMm: 52,
     footerHeightMm: 20,
     blockGapMm: 2.5,
+    bottomSafetyMm: 2,
 };
 
 export const DEFAULT_RENDER_CANDIDATES: RenderCandidate[] = [

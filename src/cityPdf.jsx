@@ -64,10 +64,11 @@ const paginateCityFlow = (flowItems) => {
     const MM_PER_WEIGHT = 38;
     const planner = new TypeScriptPdfLayoutEngine({
         page: { width: 210, height: 297 },
-        margins: { top: 5, right: 5, bottom: 2, left: 5 },
+        margins: { top: 5, right: 5, bottom: 5, left: 5 },
         headerHeightMm: 52,
         footerHeightMm: 20,
         blockGapMm: 2,
+        bottomSafetyMm: 2,
         footerVisibility: 'last-and-single',
     });
 
