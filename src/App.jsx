@@ -1309,6 +1309,13 @@ function App() {
         }
     };
 
+    const backToMenu = () => {
+        setShowPreview(false);
+        setShowCityPreview(false);
+        setShowPlaceForm(false);
+        setCurrentStep(1);
+    };
+
     const generateCityPDF = async (placeParam = null) => {
         if (!placeParam && !cityPdfPlace) return;
         const sourcePlace = placeParam || cityPdfPlace;
@@ -1718,7 +1725,7 @@ function App() {
                                             <h1 className="section-title" style={{ margin: 0 }}>Destination Library</h1>
                                             <p style={{ color: 'var(--text-light)' }}>Add or update cities and their special locations.</p>
                                         </div>
-                                        <button className="btn btn-outline" onClick={() => setCurrentStep(1)}>Back to Menu</button>
+                                        <button className="btn btn-outline" type="button" onClick={backToMenu}>Back to Menu</button>
                                     </div>
 
                                     <div className="destination-toolbar" style={{ marginBottom: '30px' }}>
@@ -1804,7 +1811,8 @@ function App() {
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '35px', flexWrap: 'wrap', gap: '20px' }}>
                                         <div>
                                             <button
-                                                onClick={() => setCurrentStep(1)}
+                                                onClick={backToMenu}
+                                                type="button"
                                                 className="btn btn-outline"
                                                 style={{ width: 'auto', padding: '8px 16px', fontSize: '0.85rem', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}
                                             >
