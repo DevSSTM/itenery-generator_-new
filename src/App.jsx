@@ -1892,9 +1892,9 @@ function App() {
                                         <div className="builder-card">
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px', flexWrap: 'wrap', gap: '15px' }}>
                                                 <h2 style={{ fontSize: '1.4rem', color: 'var(--primary)', margin: 0 }}>Day {activeDay} Destinations</h2>
-                                                
+
                                                 <div style={{ display: 'flex', gap: '12px' }}>
-                                                    <div 
+                                                    <div
                                                         className="premium-switch-container"
                                                         onClick={() => {
                                                             const checked = !showDayNote[activeDay];
@@ -1905,12 +1905,12 @@ function App() {
                                                         <input
                                                             type="checkbox"
                                                             checked={showDayNote[activeDay] || false}
-                                                            onChange={() => {}} 
+                                                            onChange={() => { }}
                                                         />
-                                                        <span className="premium-switch-text">Day Highlights</span>
+                                                        <span className="premium-switch-text">Day Notes</span>
                                                     </div>
 
-                                                    <div 
+                                                    <div
                                                         className="premium-switch-container"
                                                         onClick={() => {
                                                             const checked = !showCityNote[activeDay];
@@ -1923,9 +1923,9 @@ function App() {
                                                         <input
                                                             type="checkbox"
                                                             checked={showCityNote[activeDay] || false}
-                                                            onChange={() => {}}
+                                                            onChange={() => { }}
                                                         />
-                                                        <span className="premium-switch-text">City Tips</span>
+                                                        <span className="premium-switch-text">City Notes</span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -1940,7 +1940,7 @@ function App() {
                                                         className="note-builder-container day-note"
                                                     >
                                                         <div className="note-label-premium"><Cloud size={14} /> Global Day {activeDay} Highlights</div>
-                                                        
+
                                                         <div className="points-list-premium">
                                                             {(dayNoteText[activeDay] || '').split('\n').filter(p => p.trim()).map((point, pIdx) => (
                                                                 <div key={pIdx} className="point-card-premium">
@@ -2025,7 +2025,7 @@ function App() {
                                                         className="note-builder-container city-note"
                                                     >
                                                         <div className="note-label-premium"><MapPin size={14} /> Local City Knowledge</div>
-                                                        
+
                                                         {activeDayCities.length === 0 ? (
                                                             <div style={{ fontSize: '0.9rem', color: '#1e3a8a', padding: '20px', textAlign: 'center', background: 'rgba(255,255,255,0.5)', borderRadius: '12px' }}>
                                                                 Add at least one city to Day {activeDay} to write city-specific tips.
@@ -2267,9 +2267,9 @@ function App() {
                                                             </div>
                                                         )}
 
-                                            </motion.div>
-                                        );
-                                    })}
+                                                    </motion.div>
+                                                );
+                                            })}
 
                                             <RouteMapPlanner
                                                 plan={routeMapPlan}
@@ -2315,7 +2315,7 @@ function App() {
                             <h2 style={{ marginBottom: '20px', color: 'var(--primary)' }}>Itinerary Status</h2>
 
                             <div className="status-card" style={{ background: '#f8fafc', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-                                    <div style={{ marginBottom: '15px' }}>
+                                <div style={{ marginBottom: '15px' }}>
                                     <div style={{ fontSize: '0.8rem', color: '#64748b' }}>Current Duration</div>
                                     <div style={{ fontWeight: 'bold' }}>
                                         {useTravelDates
