@@ -601,10 +601,12 @@ header {
 .pdf-page-content {
     position: relative;
     flex: 1;
+    min-height: 0;
     margin: 19px;
     /* This corresponds to the borderMargin + internalPadding */
     display: flex;
     flex-direction: column;
+    overflow: hidden;
 }
 
 .pdf-page-border {
@@ -622,6 +624,7 @@ header {
 .pdf-page-inner {
     padding: 18px 34px 8px 34px;
     height: 100%;
+    min-height: 0;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;

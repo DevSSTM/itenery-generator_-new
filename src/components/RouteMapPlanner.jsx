@@ -110,24 +110,7 @@ const TrackMapView = ({ onViewChange, onMapReady }) => {
   return null;
 };
 
-const RouteMapPdfFooter = () => (
-  <div className="pdf-footer-premium">
-    <div className="footer-top">
-      <div className="footer-brand">
-        <h3>INVEL HOLIDAYS SRI LANKA</h3>
-        <p>www.invelsrilanka.com</p>
-        <p style={{ fontSize: '0.75rem', marginTop: '10px', opacity: 0.8 }}>(c) {new Date().getFullYear()} Invel Holidays - Where Journeys Become Stories</p>
-      </div>
-      <div className="footer-contact-grid">
-        <div className="contact-item">No. 197/43A, Vihara Mawatha, Athurugiriya, Sri Lanka.</div>
-        <div className="contact-item">invelholidays@gmail.com</div>
-        <div className="contact-item">+94 11 588 2489</div>
-      </div>
-    </div>
-  </div>
-);
-
-export const RouteMapPdfPage = ({ plan, showFooter = false }) => {
+export const RouteMapPdfPage = ({ plan }) => {
   const safe = normalizePlan(plan);
   const routePoints = Array.isArray(safe.routeCoords)
     ? safe.routeCoords.map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) })).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng))
@@ -142,26 +125,19 @@ export const RouteMapPdfPage = ({ plan, showFooter = false }) => {
   const stopSvg = stopPoints.map((p) => toSriLankaCanvasPoint(p, width, height));
 
   return (
-    <div className="pdf-page route-map-pdf-page">
+    <div className="pdf-page route-map-pdf-page" data-pdf-page-type="route-map">
       <div className="pdf-page-border"></div>
       <div className="pdf-page-content">
         <div className="pdf-page-inner">
-          <div className="pdf-fixed-content" data-pdf-role="body">
-            <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', padding: '14px', background: '#fff' }}>
-              <h2 style={{ margin: 0, color: '#0f172a', fontSize: '1.25rem' }}>Sri Lanka Route Map</h2>
-              <p style={{ margin: '8px 0 14px', color: '#475569', fontSize: '0.9rem' }}>
-                {safe.mapSnapshot
-                  ? 'Captured map view with selected locations and combined route.'
-                  : 'Entire Sri Lanka view with red destination points and combined route line.'}
-              </p>
-
+          <div className="pdf-fixed-content" data-pdf-role="body" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div style={{ border: '1px solid #dbeafe', borderRadius: '10px', padding: '6px', background: '#fff', display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%' }}>
               {safe.mapSnapshot ? (
-                <div style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid #dbeafe' }}>
-                  <img src={safe.mapSnapshot} alt="Sri Lanka route map snapshot" style={{ width: '100%', display: 'block' }} />
+                <div style={{ borderRadius: '8px', overflow: 'hidden', border: '1px solid #dbeafe', flex: '1 1 auto', minHeight: 0 }}>
+                  <img src={safe.mapSnapshot} alt="Sri Lanka route map snapshot" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
                 </div>
               ) : (
-                <div style={{ background: '#f8fafc', borderRadius: '10px', border: '1px solid #dbeafe', padding: '8px' }}>
-                  <svg viewBox={`0 0 ${width} ${height}`} width="100%" height="340" role="img" aria-label="Sri Lanka route map">
+                <div style={{ background: '#f8fafc', borderRadius: '8px', border: '1px solid #dbeafe', padding: '8px', flex: '1 1 auto', minHeight: 0 }}>
+                  <svg viewBox={`0 0 ${width} ${height}`} width="100%" height="100%" role="img" aria-label="Sri Lanka route map" preserveAspectRatio="xMidYMid meet">
                     <rect x="0" y="0" width={width} height={height} fill="#f8fafc" />
 
                     <path
@@ -193,24 +169,8 @@ export const RouteMapPdfPage = ({ plan, showFooter = false }) => {
                   </svg>
                 </div>
               )}
-
-              <div style={{ marginTop: '12px', borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>
-                <h3 style={{ margin: '0 0 8px', color: '#1e293b', fontSize: '0.95rem' }}>Stops</h3>
-                <div style={{ display: 'grid', gap: '6px' }}>
-                  {stopPoints.map((stop, idx) => (
-                    <div key={`${stop.id || stop.name}-${idx}`} style={{ fontSize: '0.85rem', color: '#334155' }}>
-                      {idx + 1}. {stop.shortName || stop.name}
-                    </div>
-                  ))}
-                </div>
-              </div>
             </div>
           </div>
-          {showFooter && (
-            <div className="pdf-fixed-footer" data-pdf-role="footer">
-              <RouteMapPdfFooter />
-            </div>
-          )}
         </div>
       </div>
     </div>

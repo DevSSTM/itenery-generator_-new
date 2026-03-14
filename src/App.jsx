@@ -1203,7 +1203,34 @@ function App() {
         return (px / pageHeightPx) * 297;
     };
 
-    const planItineraryPages = React.useCallback(async (heightInflation = 1.0) => {
+    const measureWelcomeReserveMm = async (bodyWidthPx, pageHeightPx) => {
+        const host = ensureMeasureHost();
+        const wrapper = document.createElement('div');
+        wrapper.style.width = `${Math.max(1, Math.floor(bodyWidthPx))}px`;
+        wrapper.style.display = 'block';
+        wrapper.style.padding = '0';
+        wrapper.style.margin = '0';
+        host.appendChild(wrapper);
+        const root = createRoot(wrapper);
+        root.render(
+            <div className="pdf-welcome-section">
+                <div className="welcome-tag">Ayubowan!</div>
+                <p>
+                    Welcome to the Paradise Island of Sri Lanka. We have curated this itinerary to ensure you experience
+                    the very best of our breathtaking landscapes and cultural heritage.
+                </p>
+            </div>
+        );
+        await waitForNextFrame();
+        await waitForFontsAndImages(wrapper);
+        const px = wrapper.getBoundingClientRect().height;
+        root.unmount();
+        wrapper.remove();
+        // Guard for margin-collapsing, list wrapper padding and subpixel variance in hidden render contexts.
+        return ((px / pageHeightPx) * 297) + 4.2;
+    };
+
+    const planItineraryPages = React.useCallback(async (extraSafetyMm = 0) => {
         const rawBlocks = buildMeasuredBlocks();
         if (rawBlocks.length === 0) {
             return [{ blocks: [], showHeader: true, showFooter: true, footerExceptionApplied: false }];
@@ -1220,16 +1247,26 @@ function App() {
             footerVisibility: 'last-and-single',
         });
 
-        const welcomeReservePx = Math.max(0, metrics.singleNoFooterPx - metrics.firstBodyPx);
-        const welcomeReserveMm = (welcomeReservePx / metrics.pageHeightPx) * 297;
+        const welcomeReserveMm = await measureWelcomeReserveMm(metrics.bodyWidthPx, metrics.pageHeightPx);
         const measuredBlocks = [];
+
+        const baseSafetyByTypeMm = (block, measuredMm) => {
+            if (block.type === 'dayNote') {
+                return 0.8 + Math.min(0.6, measuredMm * 0.02);
+            }
+            if (block.showHeading) {
+                return 1.0 + Math.min(0.8, measuredMm * 0.015);
+            }
+            // Continuation blocks should be tight to avoid large free-space tails on later pages.
+            return 0.2 + Math.min(0.35, measuredMm * 0.01);
+        };
 
         for (const block of rawBlocks) {
             const measuredMm = await measureBlockHeightMm(block, metrics.bodyWidthPx, metrics.pageHeightPx);
             measuredBlocks.push({
                 id: block.id,
                 block,
-                heightMm: Math.max(4, measuredMm * heightInflation),
+                heightMm: Math.max(4, measuredMm + baseSafetyByTypeMm(block, measuredMm) + extraSafetyMm),
             });
         }
 
@@ -1291,40 +1328,64 @@ function App() {
         if (isPreparingPreview || isGenerating) return;
         setIsPreparingPreview(true);
         let passed = false;
-        let lastError = null;
 
-        try {
-            for (let attempt = 0; attempt < 4; attempt++) {
-                const inflation = 1 + (attempt * 0.06);
-                const planned = await planItineraryPages(inflation);
-                setPagesData(planned);
-                await waitForRenderTick(220);
+        const tryPlanAndValidate = async (extraSafetyMm, label) => {
+            const planned = await planItineraryPages(extraSafetyMm);
+            setPagesData(planned);
+            await waitForRenderTick(180);
+            const container = document.getElementById('hidden-pdf-content');
+            if (!container) throw new Error('Preview container not found');
+            await waitForFontsAndImages(container);
+            ensurePdfLayoutValid(container, label);
+            return planned;
+        };
 
-                const container = document.getElementById('hidden-pdf-content');
-                if (!container) {
-                    throw new Error('Preview container not found');
-                }
+        const resolveBestValidatedPages = async (label) => {
+            const coarseCandidates = [0, 0.2, 0.4, 0.7, 1.0, 1.3, 1.6, 2.0, 2.4, 2.8, 3.2];
+            let lowFail = 0;
+            let highPass = null;
+            let bestPages = null;
+            let lastError = null;
 
+            for (const candidate of coarseCandidates) {
                 try {
-                    await waitForFontsAndImages(container);
-                    ensurePdfLayoutValid(container, 'Itinerary Preview');
-                    passed = true;
-                    setShowPreview(true);
-                    return;
+                    const pages = await tryPlanAndValidate(candidate, label);
+                    highPass = candidate;
+                    bestPages = pages;
+                    break;
                 } catch (err) {
+                    lowFail = candidate;
                     lastError = err;
-                    const msg = String(err?.message || '').toLowerCase();
-                    const isLayoutIssue =
-                        msg.includes('layout validation failed')
-                        || msg.includes('bottom safety limit')
-                        || msg.includes('footer safety')
-                        || msg.includes('printable border')
-                        || msg.includes('overlaps');
-                    if (!isLayoutIssue) throw err;
                 }
             }
 
-            throw lastError || new Error('Preview layout validation failed');
+            if (highPass === null || !bestPages) {
+                throw lastError || new Error('Preview layout validation failed');
+            }
+
+            // Binary refine to the smallest safe inflation, reducing unnecessary blank space.
+            for (let i = 0; i < 5; i++) {
+                const mid = Number(((lowFail + highPass) / 2).toFixed(3));
+                if (mid <= lowFail + 0.05) break;
+                try {
+                    const pages = await tryPlanAndValidate(mid, label);
+                    highPass = mid;
+                    bestPages = pages;
+                } catch (_err) {
+                    lowFail = mid;
+                }
+            }
+
+            setPagesData(bestPages);
+            await waitForRenderTick(120);
+            return bestPages;
+        };
+
+        try {
+            await resolveBestValidatedPages('Itinerary Preview');
+            passed = true;
+            setShowPreview(true);
+            return;
         } catch (error) {
             showSystemPopup({
                 title: 'Preview Validation Failed',
@@ -1355,60 +1416,80 @@ function App() {
         // Higher delay to ensure all dynamic content and images are fully rendered
         setTimeout(async () => {
             try {
-                let lastError = null;
-                for (let attempt = 0; attempt < 4; attempt++) {
-                    const inflation = 1 + (attempt * 0.06);
-                    const planned = await planItineraryPages(inflation);
+                const tryPlanAndValidate = async (extraSafetyMm, label) => {
+                    const planned = await planItineraryPages(extraSafetyMm);
                     setPagesData(planned);
-                    await waitForRenderTick(200);
+                    await waitForRenderTick(180);
+                    const container = document.getElementById('hidden-pdf-content');
+                    if (!container) throw new Error('PDF container not found');
+                    await waitForFontsAndImages(container);
+                    ensurePdfLayoutValid(container, label);
+                    return planned;
+                };
 
+                const coarseCandidates = [0, 0.2, 0.4, 0.7, 1.0, 1.3, 1.6, 2.0, 2.4, 2.8, 3.2];
+                let lowFail = 0;
+                let highPass = null;
+                let bestPages = null;
+                let lastError = null;
+
+                for (const candidate of coarseCandidates) {
                     try {
-                        const result = await generateItineraryPdf({
-                            containerId: 'hidden-pdf-content',
-                            routeMapPlan,
-                            routeMapPlanRefCurrent: routeMapPlanRef.current,
-                            forcedRouteMapSnapshot: safeForcedSnapshot,
-                            forceAttachRoutePlan: safeForceAttach,
-                            routeMapSnapshotKey: ROUTE_MAP_SNAPSHOT_KEY,
-                            setRouteMapPlan,
-                        });
-
-                        if (result === 'container-missing') {
-                            showSystemPopup({
-                                title: 'PDF Error',
-                                message: 'PDF container was not found.',
-                                details: 'Please reopen preview and try again.',
-                                tone: 'error',
-                            });
-                            return;
-                        }
-                        if (result === 'no-content') {
-                            showSystemPopup({
-                                title: 'No Itinerary Content',
-                                message: 'Please add some places to the itinerary first.',
-                                tone: 'warning',
-                            });
-                            return;
-                        }
-
-                        return;
-                    } catch (attemptError) {
-                        lastError = attemptError;
-                        const msg = String(attemptError?.message || '').toLowerCase();
-                        const isLayoutValidationFailure =
-                            msg.includes('layout validation failed');
-                        const isBottomSafetyFailure =
-                            msg.includes('bottom safety limit')
-                            || msg.includes('footer safety clearance')
-                            || msg.includes('overlaps footer')
-                            || msg.includes('printable border');
-                        if (!isBottomSafetyFailure && !isLayoutValidationFailure) {
-                            throw attemptError;
-                        }
+                        const pages = await tryPlanAndValidate(candidate, 'Itinerary PDF');
+                        highPass = candidate;
+                        bestPages = pages;
+                        break;
+                    } catch (err) {
+                        lowFail = candidate;
+                        lastError = err;
                     }
                 }
 
-                if (lastError) throw lastError;
+                if (highPass === null || !bestPages) {
+                    throw lastError || new Error('PDF layout validation failed');
+                }
+
+                for (let i = 0; i < 5; i++) {
+                    const mid = Number(((lowFail + highPass) / 2).toFixed(3));
+                    if (mid <= lowFail + 0.05) break;
+                    try {
+                        const pages = await tryPlanAndValidate(mid, 'Itinerary PDF');
+                        highPass = mid;
+                        bestPages = pages;
+                    } catch (_err) {
+                        lowFail = mid;
+                    }
+                }
+
+                setPagesData(bestPages);
+                await waitForRenderTick(120);
+
+                const result = await generateItineraryPdf({
+                    containerId: 'hidden-pdf-content',
+                    routeMapPlan,
+                    routeMapPlanRefCurrent: routeMapPlanRef.current,
+                    forcedRouteMapSnapshot: safeForcedSnapshot,
+                    forceAttachRoutePlan: safeForceAttach,
+                    routeMapSnapshotKey: ROUTE_MAP_SNAPSHOT_KEY,
+                    setRouteMapPlan,
+                });
+
+                if (result === 'container-missing') {
+                    showSystemPopup({
+                        title: 'PDF Error',
+                        message: 'PDF container was not found.',
+                        details: 'Please reopen preview and try again.',
+                        tone: 'error',
+                    });
+                    return;
+                }
+                if (result === 'no-content') {
+                    showSystemPopup({
+                        title: 'No Itinerary Content',
+                        message: 'Please add some places to the itinerary first.',
+                        tone: 'warning',
+                    });
+                }
             } catch (error) {
                 console.error(error);
                 showSystemPopup({

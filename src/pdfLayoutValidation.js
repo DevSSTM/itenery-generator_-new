@@ -51,6 +51,11 @@ export const validatePdfLayout = (container) => {
 
     const expectedMargins = [];
     const multiplePages = pages.length > 1;
+    const lastPage = pages[pages.length - 1];
+    const hasRouteMapLastPage = Boolean(lastPage?.classList?.contains('route-map-pdf-page') || lastPage?.getAttribute?.('data-pdf-page-type') === 'route-map');
+    const expectedFooterPageIndex = multiplePages
+        ? (hasRouteMapLastPage && pages.length > 1 ? pages.length - 2 : pages.length - 1)
+        : 0;
 
     pages.forEach((page, pageIndex) => {
         const border = page.querySelector(':scope > .pdf-page-border');
@@ -66,7 +71,7 @@ export const validatePdfLayout = (container) => {
         if (!body) errors.push(`Page ${pageIndex + 1}: missing body area`);
 
         const shouldHaveHeader = multiplePages ? pageIndex === 0 : true;
-        const shouldHaveFooter = multiplePages ? pageIndex === pages.length - 1 : footerExceptionTag !== 'single-fit';
+        const shouldHaveFooter = multiplePages ? pageIndex === expectedFooterPageIndex : footerExceptionTag !== 'single-fit';
         if (Boolean(header) !== shouldHaveHeader) {
             errors.push(`Page ${pageIndex + 1}: header placement rule failed`);
         }

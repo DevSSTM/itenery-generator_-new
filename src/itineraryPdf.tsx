@@ -412,7 +412,7 @@ export const ItineraryPDFContent = ({
             })}
             {includeRouteMapPage && routeMapPlan && (
                 <div key="route-map-pdf-page">
-                    <RouteMapPdfPage plan={routeMapPlan} showFooter />
+                    <RouteMapPdfPage plan={routeMapPlan} />
                 </div>
             )}
         </div>
