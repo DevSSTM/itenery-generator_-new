@@ -1,17 +1,16 @@
 import React, { useState, useRef } from 'react';
 import { places } from './data';
-import { Download, Eye, X, Check, MapPin, Calendar, User, Globe, Image as ImageIcon, Edit2, Trash2, Plus, Phone, Plane, Camera, Palmtree, Compass, Cloud, AlertTriangle } from 'lucide-react';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
+import { Download, Eye, X, Check, MapPin, Calendar, User, Image as ImageIcon, Edit2, Trash2, Plus, Plane, Camera, Palmtree, Compass, Cloud, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Analytics } from "@vercel/analytics/react";
 
 import galleryDataRaw from './gallery_data.json';
 import { supabase } from './supabase';
 import { CITY_PDF_CONTAINER_ID, CityPDFContent, downloadCityPdfFromContainer } from './cityPdf';
-import RouteMapPlanner, { RouteMapPdfPage, hasRenderableRouteMapPlan } from './components/RouteMapPlanner';
-import { ensurePdfLayoutValid } from './pdfLayoutValidation';
+import RouteMapPlanner, { hasRenderableRouteMapPlan } from './components/RouteMapPlanner';
 import { TypeScriptPdfLayoutEngine } from './pdf-engine';
+import ItineraryPDFContent, { generateItineraryPdf } from './itineraryPdf';
+import { ensurePdfLayoutValid } from './pdfLayoutValidation';
 
 const ROUTE_MAP_SNAPSHOT_KEY = 'route_map_saved_snapshot_v1';
 const LOGIN_ROLE_KEY = 'itinerary_login_role_v1';
@@ -187,6 +186,8 @@ function App() {
     const [showCityPreview, setShowCityPreview] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
     const [isGeneratingCityPdf, setIsGeneratingCityPdf] = useState(false);
+    const [isPreparingPreview, setIsPreparingPreview] = useState(false);
+    const [itineraryPdfScale, setItineraryPdfScale] = useState(1);
     const [systemPopup, setSystemPopup] = useState({
         open: false,
         title: '',
@@ -913,16 +914,7 @@ function App() {
     };
     const paginatePlaces = () => {
         const flowItems = [];
-        const isArrivalLike = (place) => {
-            const text = `${place?.name || ''} ${place?.title || ''} ${place?.id || ''}`.toLowerCase();
-            return text.includes('arrival');
-        };
-
-        const day1PlacesForRule = itinerary[1] || [];
-        const hasArrivalOnFirstPage = day1PlacesForRule.some((p) => isArrivalLike(p));
-        const firstCityDestIdWithoutArrival = !hasArrivalOnFirstPage && day1PlacesForRule.length > 0
-            ? (day1PlacesForRule[0].id || day1PlacesForRule[0].cityId || null)
-            : null;
+        const safeScale = Math.max(1, Number(itineraryPdfScale) || 1);
 
         for (let d = 1; d <= numDays; d++) {
             const dayPlaces = itinerary[d] || [];
@@ -994,8 +986,8 @@ function App() {
                 const linesRaw = (item.text || '').split('\n').filter(l => l.trim());
                 weight = 0.42 + (linesRaw.length * 0.16);
             } else if (item.type === 'dest-head') {
-                weight = 1.0;
-                if (item.image2) weight += 0.2;
+                weight = 1.08;
+                if (item.image2) weight += 0.18;
             } else if (item.type === 'dest-para') {
                 weight = Math.max(0.06, (item.text || '').length / 1200);
             } else if (item.type === 'dest-highlight-point') {
@@ -1003,17 +995,17 @@ function App() {
                 const subName = typeof sub === 'string' ? sub : (sub?.name || '');
                 const subDesc = typeof sub === 'string' ? '' : (sub?.description || '');
                 const pointLen = (subName + ' ' + subDesc).trim().length;
-                const estimatedLines = Math.max(1, Math.ceil(pointLen / 70));
-                weight = Math.max(0.36, 0.2 + (pointLen / 520) + (estimatedLines * 0.09));
+                const estimatedLines = Math.max(1, Math.ceil(pointLen / 56));
+                weight = Math.max(0.48, 0.28 + (pointLen / 430) + (estimatedLines * 0.11));
             } else if (item.type === 'city-note-point') {
                 const noteLen = (item.text || '').trim().length;
                 // First city-note line also carries the visual box title/container overhead.
                 if (item.isFirst) {
-                    const estimatedLines = Math.max(1, Math.ceil(noteLen / 72));
-                    weight = Math.max(0.55, 0.34 + (noteLen / 460) + (estimatedLines * 0.08));
+                    const estimatedLines = Math.max(1, Math.ceil(noteLen / 58));
+                    weight = Math.max(0.68, 0.42 + (noteLen / 400) + (estimatedLines * 0.1));
                 } else {
-                    const estimatedLines = Math.max(1, Math.ceil(noteLen / 72));
-                    weight = Math.max(0.32, 0.2 + (noteLen / 560) + (estimatedLines * 0.05));
+                    const estimatedLines = Math.max(1, Math.ceil(noteLen / 58));
+                    weight = Math.max(0.42, 0.26 + (noteLen / 470) + (estimatedLines * 0.07));
                 }
             }
             return weight;
@@ -1022,40 +1014,21 @@ function App() {
         const MM_PER_WEIGHT = 46;
         const FIRST_PAGE_WELCOME_RESERVE_MM = 20;
         const ENTRY_GAP_MM = 2;
+        const FOOTER_SAFETY_CLEARANCE_MM = 2;
         const planner = new TypeScriptPdfLayoutEngine({
             page: { width: 210, height: 297 },
             margins: { top: 5, right: 5, bottom: 2, left: 5 },
             headerHeightMm: 52,
-            footerHeightMm: 20,
+            // Reserve 2mm safety clearance above the visible footer area.
+            footerHeightMm: 20 + FOOTER_SAFETY_CLEARANCE_MM,
             blockGapMm: ENTRY_GAP_MM,
             footerVisibility: 'last-and-single',
         });
 
         const entries = [];
-        const subPlacesPageBreakByCity = new Set();
         for (let i = 0; i < flowItems.length; i++) {
             const current = flowItems[i];
             const next = flowItems[i + 1];
-            const cityKey = `${current?.day ?? ''}-${current?.destId ?? ''}`;
-            const isFirstCityWithoutArrivalOnDay1 =
-                !hasArrivalOnFirstPage
-                && current?.day === 1
-                && current?.destId === firstCityDestIdWithoutArrival;
-            const startsSubPlacesArea =
-                (current?.type === 'dest-highlight-point' || current?.type === 'city-note-point')
-                && !isFirstCityWithoutArrivalOnDay1
-                && !subPlacesPageBreakByCity.has(cityKey);
-
-            if (startsSubPlacesArea) {
-                entries.push({
-                    id: `entry-break-${i}`,
-                    itemIndexes: [],
-                    heightMm: 0,
-                    keepTogether: true,
-                    forcePageBreak: true,
-                });
-                subPlacesPageBreakByCity.add(cityKey);
-            }
 
             const canPairHead =
                 current.type === 'dest-head'
@@ -1068,7 +1041,7 @@ function App() {
                 entries.push({
                     id: `entry-${i}`,
                     itemIndexes: [i, i + 1],
-                    heightMm: Math.max(12, pairWeight * MM_PER_WEIGHT + ENTRY_GAP_MM),
+                    heightMm: Math.max(12, (pairWeight * MM_PER_WEIGHT * safeScale) + ENTRY_GAP_MM),
                     keepTogether: true,
                 });
                 i += 1;
@@ -1078,7 +1051,7 @@ function App() {
             entries.push({
                 id: `entry-${i}`,
                 itemIndexes: [i],
-                heightMm: Math.max(8, getItemWeight(current) * MM_PER_WEIGHT),
+                heightMm: Math.max(8, getItemWeight(current) * MM_PER_WEIGHT * safeScale),
                 keepTogether: true,
             });
         }
@@ -1134,6 +1107,82 @@ function App() {
 
     const pagesData = paginatePlaces();
     const [isPdfReady, setIsPdfReady] = useState(false);
+    const waitForRenderTick = (ms = 180) => new Promise((resolve) => setTimeout(resolve, ms));
+    const waitForFontsAndImages = async (container) => {
+        if (typeof document !== 'undefined' && document.fonts?.ready) {
+            try {
+                await document.fonts.ready;
+            } catch {
+                // Ignore and continue.
+            }
+        }
+        const images = Array.from(container.querySelectorAll('img'));
+        if (images.length === 0) return;
+        await Promise.all(images.map((img) => new Promise((resolve) => {
+            if (img.complete && img.naturalWidth > 0) {
+                resolve();
+                return;
+            }
+            const done = () => resolve();
+            img.addEventListener('load', done, { once: true });
+            img.addEventListener('error', done, { once: true });
+        })));
+    };
+
+    const openPreviewWithValidation = async () => {
+        if (isPreparingPreview || isGenerating) return;
+        setIsPreparingPreview(true);
+        let scale = Math.max(1, Number(itineraryPdfScale) || 1);
+        let lastError = null;
+
+        try {
+            await waitForRenderTick(240);
+
+            for (let attempt = 0; attempt < 7; attempt++) {
+                if (attempt > 0) {
+                    scale = Number((scale * 1.12).toFixed(3));
+                    setItineraryPdfScale(scale);
+                    await waitForRenderTick(260);
+                }
+
+                const container = document.getElementById('hidden-pdf-content');
+                if (!container) {
+                    throw new Error('Preview container not found');
+                }
+
+                try {
+                    await waitForFontsAndImages(container);
+                    ensurePdfLayoutValid(container, 'Itinerary Preview');
+                    setShowPreview(true);
+                    return;
+                } catch (err) {
+                    lastError = err;
+                    const msg = String(err?.message || '').toLowerCase();
+                    const isLayoutIssue =
+                        msg.includes('layout validation failed')
+                        || msg.includes('bottom safety limit')
+                        || msg.includes('footer safety')
+                        || msg.includes('printable border')
+                        || msg.includes('overlaps');
+                    if (!isLayoutIssue) throw err;
+                }
+            }
+
+            throw lastError || new Error('Preview layout validation failed');
+        } catch (error) {
+            showSystemPopup({
+                title: 'Preview Validation Failed',
+                message: 'Could not safely layout preview within the 2mm bottom limit.',
+                details: error?.message || '',
+                tone: 'error',
+            });
+        } finally {
+            if (scale !== itineraryPdfScale) {
+                setItineraryPdfScale(scale);
+            }
+            setIsPreparingPreview(false);
+        }
+    };
 
     const generatePDF = async (forcedRouteMapSnapshot = '', forceAttachRoutePlan = false) => {
         const safeForcedSnapshot = typeof forcedRouteMapSnapshot === 'string' ? forcedRouteMapSnapshot : '';
@@ -1152,103 +1201,66 @@ function App() {
         // Higher delay to ensure all dynamic content and images are fully rendered
         setTimeout(async () => {
             try {
-                const latestRouteMapPlan = routeMapPlanRef.current || routeMapPlan;
-                const container = document.getElementById('hidden-pdf-content');
-                if (!container) {
-                    console.error("PDF container not found");
-                    showSystemPopup({
-                        title: 'PDF Error',
-                        message: 'PDF container was not found.',
-                        details: 'Please reopen preview and try again.',
-                        tone: 'error',
-                    });
-                    setIsGenerating(false);
-                    return;
-                }
-                const pageElements = container.querySelectorAll('.pdf-page');
+                let scale = Math.max(1, Number(itineraryPdfScale) || 1);
+                let lastError = null;
 
-                if (pageElements.length === 0) {
-                    showSystemPopup({
-                        title: 'No Itinerary Content',
-                        message: 'Please add some places to the itinerary first.',
-                        tone: 'warning',
-                    });
-                    setIsGenerating(false);
-                    return;
-                }
-
-                ensurePdfLayoutValid(container, 'Itinerary PDF');
-
-                const pdf = new jsPDF('p', 'mm', 'a4');
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = pdf.internal.pageSize.getHeight();
-
-                for (let i = 0; i < pageElements.length; i++) {
-                    if (i > 0) pdf.addPage();
-
-                    const canvas = await html2canvas(pageElements[i], {
-                        scale: 1.5, // Reduced scale for better performance and stability
-                        useCORS: true,
-                        logging: false,
-                        allowTaint: true,
-                        backgroundColor: '#ffffff',
-                    });
-
-                    const imgData = canvas.toDataURL('image/jpeg', 0.8);
-                    pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-                }
-
-                const canAttachRoutePlan = safeForceAttach
-                    || latestRouteMapPlan?.attachToFinalPdf === true
-                    || routeMapPlan?.attachToFinalPdf === true;
-                if (canAttachRoutePlan) {
-                    const hiddenHasRouteMapPage = container.querySelectorAll('.route-map-pdf-page').length > 0;
-                    if (hiddenHasRouteMapPage) {
-                        const dateStr = new Date().toISOString().slice(0, 10);
-                        pdf.save(`Invel-Sri-Lanka-Itinerary-${dateStr}.pdf`);
-                        return;
+                for (let attempt = 0; attempt < 7; attempt++) {
+                    if (attempt > 0) {
+                        scale = Number((scale * 1.12).toFixed(3));
+                        setItineraryPdfScale(scale);
+                        await waitForRenderTick(220);
                     }
 
-                    let persistedSnapshot = '';
                     try {
-                        persistedSnapshot = localStorage.getItem(ROUTE_MAP_SNAPSHOT_KEY) || '';
-                    } catch (_err) {
-                        persistedSnapshot = '';
-                    }
-                    const routeMapSnapshot = safeForcedSnapshot || persistedSnapshot || latestRouteMapPlan?.mapSnapshot || '';
+                        const result = await generateItineraryPdf({
+                            containerId: 'hidden-pdf-content',
+                            routeMapPlan,
+                            routeMapPlanRefCurrent: routeMapPlanRef.current,
+                            forcedRouteMapSnapshot: safeForcedSnapshot,
+                            forceAttachRoutePlan: safeForceAttach,
+                            routeMapSnapshotKey: ROUTE_MAP_SNAPSHOT_KEY,
+                            setRouteMapPlan,
+                        });
 
-                    if (routeMapSnapshot) {
-                        if (routeMapSnapshot !== latestRouteMapPlan?.mapSnapshot) {
-                            setRouteMapPlan((prev) => ({
-                                ...(prev || {}),
-                                mapSnapshot: routeMapSnapshot,
-                            }));
+                        if (result === 'container-missing') {
+                            showSystemPopup({
+                                title: 'PDF Error',
+                                message: 'PDF container was not found.',
+                                details: 'Please reopen preview and try again.',
+                                tone: 'error',
+                            });
+                            return;
+                        }
+                        if (result === 'no-content') {
+                            showSystemPopup({
+                                title: 'No Itinerary Content',
+                                message: 'Please add some places to the itinerary first.',
+                                tone: 'warning',
+                            });
+                            return;
                         }
 
-                        pdf.addPage();
-                        const pdfHeight = pdf.internal.pageSize.getHeight();
-                        const marginX = 8;
-                        const marginY = 8;
-                        const mapImgType = routeMapSnapshot.startsWith('data:image/png') ? 'PNG' : 'JPEG';
-                        const imageSize = await new Promise((resolve, reject) => {
-                            const img = new Image();
-                            img.onload = () => resolve({ width: img.naturalWidth || img.width, height: img.naturalHeight || img.height });
-                            img.onerror = () => reject(new Error('Route map image load failed'));
-                            img.src = routeMapSnapshot;
-                        });
-                        const maxWidth = pdfWidth - marginX * 2;
-                        const maxHeight = pdfHeight - marginY * 2;
-                        const ratio = Math.min(maxWidth / imageSize.width, maxHeight / imageSize.height);
-                        const drawWidth = imageSize.width * ratio;
-                        const drawHeight = imageSize.height * ratio;
-                        const drawX = (pdfWidth - drawWidth) / 2;
-                        const drawY = (pdfHeight - drawHeight) / 2;
-                        pdf.addImage(routeMapSnapshot, mapImgType, drawX, drawY, drawWidth, drawHeight);
+                        if (scale !== itineraryPdfScale) {
+                            setItineraryPdfScale(scale);
+                        }
+                        return;
+                    } catch (attemptError) {
+                        lastError = attemptError;
+                        const msg = String(attemptError?.message || '').toLowerCase();
+                        const isLayoutValidationFailure =
+                            msg.includes('layout validation failed');
+                        const isBottomSafetyFailure =
+                            msg.includes('bottom safety limit')
+                            || msg.includes('footer safety clearance')
+                            || msg.includes('overlaps footer')
+                            || msg.includes('printable border');
+                        if (!isBottomSafetyFailure && !isLayoutValidationFailure) {
+                            throw attemptError;
+                        }
                     }
                 }
 
-                const dateStr = new Date().toISOString().slice(0, 10);
-                pdf.save(`Invel-Sri-Lanka-Itinerary-${dateStr}.pdf`);
+                if (lastError) throw lastError;
             } catch (error) {
                 console.error(error);
                 showSystemPopup({
@@ -2263,11 +2275,11 @@ function App() {
                             <div style={{ marginTop: '30px' }}>
                                 <button
                                     className="btn btn-primary"
-                                    disabled={totalSelected === 0}
-                                    onClick={() => setShowPreview(true)}
+                                    disabled={totalSelected === 0 || isPreparingPreview || isGenerating}
+                                    onClick={openPreviewWithValidation}
                                     style={{ width: '100%', marginBottom: '10px' }}
                                 >
-                                    <Eye size={20} /> Preview & Download
+                                    {isPreparingPreview ? <><div className="spinner"></div> Validating Preview...</> : <><Eye size={20} /> Preview & Download</>}
                                 </button>
 
                                 <button
@@ -2299,10 +2311,10 @@ function App() {
             {/* Always rendered but hidden for background generation if needed */}
             {/* Conditionally render hidden PDF content only when generating to save performance */}
             {
-                isGenerating && (
+                (isGenerating || isPreparingPreview) && (
                     <div style={{ position: 'fixed', left: '-2000mm', top: 0, width: '210mm', backgroundColor: 'white', zIndex: -1000 }}>
                         <div id="hidden-pdf-content">
-                            <PDFContent
+                            <ItineraryPDFContent
                                 pages={pagesData}
                                 arrivalDate={arrivalDate}
                                 departureDate={departureDate}
@@ -2414,7 +2426,7 @@ function App() {
 
                             <div className="pdf-viewer-scroll">
                                 <div ref={pdfRef}>
-                                    <PDFContent
+                                    <ItineraryPDFContent
                                         pages={pagesData}
                                         arrivalDate={arrivalDate}
                                         departureDate={departureDate}
@@ -2862,369 +2874,6 @@ function App() {
     );
 }
 
-const PDFPage = ({ children, pageNumber, totalPages, generationTime, footerExceptionApplied = false }) => (
-    <div
-        className="pdf-page"
-        data-footer-exception={footerExceptionApplied ? 'single-fit' : 'none'}
-    >
-        <div className="pdf-page-border"></div>
-        {generationTime && (
-            <div
-                className="pdf-generated-stamp"
-                data-pdf-role="generated-stamp"
-                style={{
-                position: 'absolute',
-                right: '10px',
-                top: '1px',
-                fontSize: '0.58rem',
-                lineHeight: 1.1,
-                margin: 0,
-                padding: 0,
-                opacity: 0.8,
-                fontStyle: 'italic',
-                color: 'var(--text-light)',
-                whiteSpace: 'nowrap',
-                zIndex: 100
-                }}
-            >
-                Generated: {generationTime}
-            </div>
-        )}
-        <div className="pdf-page-content">
-            <div className="pdf-page-inner">
-                {children}
-            </div>
-        </div>
-    </div>
-);
-
-const PDFContent = ({
-    pages,
-    arrivalDate,
-    departureDate,
-    useTravelDates = true,
-    manualDaysCount = 1,
-    manualNightsCount = 0,
-    tripStart,
-    tripEnd,
-    flightDetails = '',
-    customImages,
-    isPreview,
-    generationTime,
-    showDayNote = {},
-    dayNoteText = {},
-    includeRouteMapPage = false,
-    routeMapPlan = null,
-}) => {
-    const calculateTourHeading = () => {
-        let days = 0;
-        let nights = 0;
-
-        if (useTravelDates && arrivalDate && departureDate) {
-            const start = new Date(arrivalDate);
-            const end = new Date(departureDate);
-            days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
-            nights = Math.max(0, days - 1);
-        } else {
-            days = Math.max(1, parseInt(manualDaysCount, 10) || 1);
-            nights = Math.max(0, parseInt(manualNightsCount, 10) || 0);
-        }
-
-        return `${String(nights).padStart(2, '0')} NIGHTS ${String(days).padStart(2, '0')} DAYS TOUR ITINERARY TO SRI LANKA`;
-    };
-
-    const renderedDayLabels = new Set();
-
-    return (
-        <div className="pdf-preview-container">
-            {pages.map((pageData, pageIndex) => {
-                const items = Array.isArray(pageData)
-                    ? pageData
-                    : (Array.isArray(pageData?.items) ? pageData.items : []);
-                const shouldRenderHeader = typeof pageData?.showHeader === 'boolean'
-                    ? pageData.showHeader
-                    : pageIndex === 0;
-                const shouldRenderFooter = typeof pageData?.showFooter === 'boolean'
-                    ? pageData.showFooter
-                    : pageIndex === pages.length - 1;
-                const footerExceptionApplied = Boolean(pageData?.footerExceptionApplied);
-
-                return (
-                <div key={pageIndex}>
-                    <PDFPage
-                        pageNumber={pageIndex + 1}
-                        totalPages={pages.length}
-                        generationTime={generationTime}
-                        footerExceptionApplied={footerExceptionApplied}
-                    >
-                        {shouldRenderHeader && (
-                            <div className="pdf-fixed-header" data-pdf-role="header">
-                                <div className="pdf-header-premium">
-                                <div className="pdf-logo-wrapper">
-                                    <img src="/logo.png" alt="Logo" className="pdf-logo-main" />
-                                </div>
-                                <div className="pdf-header-divider"></div>
-                                <div className="pdf-header-info">
-                                    <div style={{
-                                        marginTop: '5px',
-                                        padding: '10px 0',
-                                        borderTop: '2px solid var(--primary)',
-                                        borderBottom: '2px solid var(--primary)',
-                                        textAlign: 'center',
-                                        fontWeight: 'bold',
-                                        fontSize: '1.2rem',
-                                        color: '#1a365d'
-                                    }}>
-                                        {calculateTourHeading()}
-                                    </div>
-
-                                    <div className="pdf-header-details-grid" style={{ marginTop: '15px' }}>
-                                        <div className="pdf-header-col">
-                                            {useTravelDates ? (
-                                                <>
-                                                    <div className="pdf-date-badge">
-                                                        <span className="label">ARRIVAL DATE</span>
-                                                        <span className="value">{arrivalDate ? new Date(arrivalDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'TBD'}</span>
-                                                    </div>
-                                                    <div className="pdf-date-badge">
-                                                        <span className="label">DEPARTURE DATE</span>
-                                                        <span className="value">{departureDate ? new Date(departureDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'TBD'}</span>
-                                                    </div>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <div className="pdf-date-badge">
-                                                        <span className="label">DAYS COUNT</span>
-                                                        <span className="value">{Math.max(1, parseInt(manualDaysCount, 10) || 1)}</span>
-                                                    </div>
-                                                    <div className="pdf-date-badge">
-                                                        <span className="label">NIGHTS COUNT</span>
-                                                        <span className="value">{Math.max(0, parseInt(manualNightsCount, 10) || 0)}</span>
-                                                    </div>
-                                                </>
-                                            )}
-                                        </div>
-                                        <div className="pdf-header-col">
-                                            <div className="pdf-date-badge">
-                                                <span className="label">START POINT</span>
-                                                <span className="value">{tripStart || 'Colombo / Airport'}</span>
-                                            </div>
-                                            <div className="pdf-date-badge">
-                                                <span className="label">END POINT</span>
-                                                <span className="value">{tripEnd || 'Colombo / Airport'}</span>
-                                            </div>
-                                            {flightDetails?.trim() && (
-                                                <div className="pdf-date-badge">
-                                                    <span className="label">FLIGHT DETAILS</span>
-                                                    <span className="value">{flightDetails}</span>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            </div>
-                        )}
-
-                        <div className="pdf-fixed-content" data-pdf-role="body">
-                            {pageIndex === 0 && (
-                                <div className="pdf-welcome-section">
-                                    <div className="welcome-tag">Ayubowan!</div>
-                                    <p>
-                                        Welcome to the Paradise Island of Sri Lanka. We have curated this itinerary to ensure you experience
-                                        the very best of our breathtaking landscapes and cultural heritage.
-                                    </p>
-                                </div>
-                            )}
-
-                            <div className="pdf-itinerary-list">
-                            {(() => {
-                                const grouped = [];
-                                let currentGroup = null;
-
-                                items.forEach(item => {
-                                    if (item.type === 'dayNote') {
-                                        if (currentGroup) {
-                                            grouped.push(currentGroup);
-                                            currentGroup = null;
-                                        }
-                                        grouped.push(item);
-                                    } else {
-                                        if (currentGroup && currentGroup.destId === item.destId) {
-                                            currentGroup.parts.push(item);
-                                        } else {
-                                            if (currentGroup) grouped.push(currentGroup);
-                                            currentGroup = {
-                                                type: 'dest-group',
-                                                destId: item.destId,
-                                                parts: [item],
-                                                sample: item
-                                            };
-                                        }
-                                    }
-                                });
-                                if (currentGroup) grouped.push(currentGroup);
-
-                                return grouped.map((group, gIdx) => {
-                                    if (group.type === 'dayNote') {
-                                        return (
-                                            <div key={group.id} className="pdf-day-general-note" style={{ background: '#fff9e6', border: '1.5px solid black', padding: '15px', borderRadius: '10px', marginBottom: '25px' }}>
-                                                <div style={{ color: '#000', fontSize: '1rem', fontWeight: 'bold', marginBottom: '8px', textTransform: 'uppercase' }}>DAY {group.day} SPECIAL HIGHLIGHTS</div>
-                                                <ul style={{ listStyleType: 'disc', paddingLeft: '20px', fontSize: '1.05rem', color: '#1a202c', lineHeight: '1.6', margin: 0 }}>
-                                                    {(group.text || '').split('\n').filter(line => line.trim()).map((line, i) => (
-                                                        <li key={i} style={{ marginBottom: '5px', wordBreak: 'break-word', overflowWrap: 'break-word', whiteSpace: 'normal' }}>{line.trim()}</li>
-                                                    ))}
-                                                </ul>
-                                            </div>
-                                        );
-                                    }
-
-                                    const hasHead = group.parts.some(p => p.type === 'dest-head');
-                                    const headItem = group.parts.find(p => p.type === 'dest-head');
-                                    const dayKey = `day-${group.sample.day}`;
-                                    const showDayLabel = !renderedDayLabels.has(dayKey);
-                                    if (showDayLabel) {
-                                        renderedDayLabels.add(dayKey);
-                                    }
-                                    const dayText = `DAY ${String(group.sample.day).padStart(2, '0')}`;
-
-                                    return (
-                                        <div key={`${group.destId}-${gIdx}`} className="pdf-day-item" style={{ marginBottom: '20px' }}>
-                                            <div className="pdf-day-header" style={{ marginBottom: hasHead ? '12px' : '4px', borderBottom: hasHead ? '2px solid #f8f8f8' : 'none' }}>
-                                                {showDayLabel && (
-                                                    <div className="day-number" style={{ fontSize: hasHead ? '2.2rem' : '1.2rem', whiteSpace: 'nowrap' }}>
-                                                        {dayText}
-                                                    </div>
-                                                )}
-                                                <div className="day-title-wrapper">
-                                                    {hasHead && (
-                                                        <h2 style={{ fontSize: '1.8rem' }}>
-                                                            {group.sample.name}
-                                                        </h2>
-                                                    )}
-                                                    {hasHead && <div className="day-subtitle">{headItem.title}</div>}
-                                                </div>
-                                            </div>
-
-                                            <div className="pdf-day-content" style={{ display: hasHead ? 'grid' : 'block' }}>
-                                                {hasHead && (
-                                                    <div className="pdf-day-image-wrapper">
-                                                        <img
-                                                            src={customImages[headItem.destId] || headItem.image}
-                                                            alt={headItem.name}
-                                                            className="pdf-day-image"
-                                                            style={{ height: headItem.image2 ? '135px' : '200px', marginBottom: headItem.image2 ? '10px' : '0' }}
-                                                        />
-                                                        {headItem.image2 && (
-                                                            <img
-                                                                src={customImages[`${headItem.destId}-2`] || headItem.image2}
-                                                                alt={`${headItem.name} 2`}
-                                                                className="pdf-day-image"
-                                                                style={{ height: '135px' }}
-                                                            />
-                                                        )}
-                                                    </div>
-                                                )}
-                                                <div className="pdf-day-description" style={{ flex: 1 }}>
-                                                    {(() => {
-                                                        const paraParts = group.parts.filter(p => p.type === 'dest-para');
-                                                        return paraParts.map((para, pIdx) => (
-                                                            <p key={pIdx} style={{ whiteSpace: 'pre-line', marginBottom: pIdx === paraParts.length - 1 ? 0 : '10px' }}>
-                                                                {para.text}
-                                                            </p>
-                                                        ));
-                                                    })()}
-                                                </div>
-                                            </div>
-                                            {group.parts.some(p => p.type === 'dest-highlight-point') && (
-                                                <div className="pdf-sub-places" style={{ marginTop: '10px', width: '100%' }}>
-                                                    <ul style={{ listStyleType: 'disc', paddingLeft: '18px', marginLeft: 0, textAlign: 'left' }}>
-                                                        {group.parts.filter(p => p.type === 'dest-highlight-point').map((pointItem, sIdx) => {
-                                                            const sub = pointItem.highlight;
-                                                            const rawSubName = typeof sub === 'string' ? sub : sub.name;
-                                                            const subName = rawSubName.charAt(0).toUpperCase() + rawSubName.slice(1).toLowerCase();
-                                                            const subDesc = typeof sub === 'string' ? '' : sub.description;
-                                                            return (
-                                                                <li key={sIdx} style={{ marginBottom: '10px', lineHeight: '1.5', textAlign: 'left' }}>
-                                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                                                                        <span style={{ fontWeight: '700', color: '#1a365d', fontSize: '0.9rem' }}>{subName}</span>
-                                                                        {subDesc && (
-                                                                            <div style={{ fontSize: '0.85rem', color: '#4a5568', marginTop: '4px', lineHeight: '1.4', wordBreak: 'break-word', whiteSpace: 'normal' }}>
-                                                                                {subDesc}
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                </li>
-                                                            );
-                                                        })}
-                                                    </ul>
-                                                </div>
-                                            )}
-                                            {group.parts.some(p => p.type === 'city-note-point') && (
-                                                <div style={{ marginTop: '10px', width: '100%', background: '#eef8ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '10px 12px' }}>
-                                                    <div style={{ fontSize: '0.82rem', fontWeight: '700', color: '#1e3a8a', textTransform: 'uppercase', marginBottom: '6px' }}>
-                                                        City Special Note
-                                                    </div>
-                                                    <ul style={{ listStyleType: 'disc', paddingLeft: '18px', margin: 0, textAlign: 'left' }}>
-                                                        {group.parts
-                                                            .filter(p => p.type === 'city-note-point')
-                                                            .map(notePart => (notePart.text || '').trim())
-                                                            .filter(Boolean)
-                                                            .map((line, lineIdx) => (
-                                                                <li key={lineIdx} style={{ marginBottom: '6px', fontSize: '0.88rem', color: '#1e293b', lineHeight: '1.45' }}>
-                                                                    {line.trim()}
-                                                                </li>
-                                                            ))}
-                                                    </ul>
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                });
-                            })()}
-                            </div>
-                        </div>
-
-                        {shouldRenderFooter && (
-                            <div className="pdf-footer-premium pdf-fixed-footer" data-pdf-role="footer">
-                                <div className="footer-top">
-                                    <div className="footer-brand">
-                                        <h3>INVEL HOLIDAYS SRI LANKA</h3>
-                                        <p>www.invelsrilanka.com</p>
-                                        <p style={{ fontSize: '0.75rem', marginTop: '10px', opacity: 0.8 }}>(c) {new Date().getFullYear()} Invel Holidays - Where Journeys Become Stories</p>
-                                    </div>
-                                    <div className="footer-contact-grid">
-                                        <div className="contact-item">
-                                            <MapPin size={10} style={{ marginRight: '5px' }} />
-                                            No. 197/43A, Vihara Mawatha, Athurugiriya, Sri Lanka.
-                                        </div>
-                                        <div className="contact-item">
-                                            <Globe size={10} style={{ marginRight: '5px' }} />
-                                            invelholidays@gmail.com
-                                        </div>
-                                        <div className="contact-item">
-                                            <Phone size={10} style={{ marginRight: '5px' }} />
-                                            +94 11 588 2489
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                    </PDFPage>
-                    {pageIndex < pages.length - 1 && isPreview && (
-                        <div className="page-break-indicator">Next Page</div>
-                    )}
-                </div>
-                );
-            })}
-            {includeRouteMapPage && routeMapPlan && (
-                <div key="route-map-pdf-page">
-                    <RouteMapPdfPage plan={routeMapPlan} showFooter />
-                </div>
-            )}
-        </div>
-    );
-};
-
 export default App;
+
 

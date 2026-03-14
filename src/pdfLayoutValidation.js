@@ -1,5 +1,7 @@
 const PX_TOLERANCE = 1.5;
 const OVERFLOW_TOLERANCE = 1;
+const FOOTER_SAFETY_CLEARANCE_MM = 2;
+const A4_HEIGHT_MM = 297;
 
 const hasRenderableBox = (el) => {
     if (!el) return false;
@@ -29,6 +31,11 @@ const outsideDistance = (inner, outer) => {
     const right = Math.max(0, inner.right - outer.right);
     const bottom = Math.max(0, inner.bottom - outer.bottom);
     return Math.max(left, top, right, bottom);
+};
+
+const mmToPx = (mm, pageRect) => {
+    if (!pageRect?.height) return 0;
+    return (mm / A4_HEIGHT_MM) * pageRect.height;
 };
 
 export const validatePdfLayout = (container) => {
@@ -129,6 +136,7 @@ export const validatePdfLayout = (container) => {
             }
         }
 
+        const safeBottomLimitPx = borderRect.bottom - mmToPx(FOOTER_SAFETY_CLEARANCE_MM, pageRect);
         if (footer) {
             const footerRect = footer.getBoundingClientRect();
             if (!isInside(footerRect, borderRect)) {
@@ -139,6 +147,13 @@ export const validatePdfLayout = (container) => {
                 if (bodyRect.bottom > footerRect.top + 0.5 || overlaps(bodyRect, footerRect)) {
                     errors.push(`Page ${pageIndex + 1}: body overlaps footer`);
                 }
+            }
+        }
+
+        if (body) {
+            const bodyRect = body.getBoundingClientRect();
+            if (bodyRect.bottom > safeBottomLimitPx + 0.5) {
+                errors.push(`Page ${pageIndex + 1}: body violates 2mm bottom safety limit`);
             }
         }
 
@@ -158,6 +173,9 @@ export const validatePdfLayout = (container) => {
             const rect = node.getBoundingClientRect();
             if (!isInside(rect, borderRect)) {
                 errors.push(`Page ${pageIndex + 1}: element leaves printable border`);
+            }
+            if (rect.bottom > safeBottomLimitPx + 0.5) {
+                errors.push(`Page ${pageIndex + 1}: element violates 2mm bottom safety limit`);
             }
         });
     });
