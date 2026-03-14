@@ -619,6 +619,35 @@ function App() {
         Boolean(tripStart.trim()) &&
         Boolean(tripEnd.trim());
 
+    const getCityOptionPriority = (place) => {
+        const id = String(place?.id || '').toLowerCase();
+        const name = String(place?.name || '').toLowerCase();
+        const title = String(place?.title || '').toLowerCase();
+        const text = `${id} ${name} ${title}`;
+
+        const isAirportArrival =
+            id === 'airport-arrival'
+            || text.includes('airport-arrival')
+            || (text.includes('airport') && text.includes('arrival'));
+        if (isAirportArrival) return 0;
+
+        const isAirportDeparture =
+            id === 'airport-departure'
+            || text.includes('airport-departure')
+            || text.includes('arport-dipature')
+            || (text.includes('airport') && text.includes('departure'));
+        if (isAirportDeparture) return 1;
+
+        return 2;
+    };
+
+    const sortedCityOptions = [...allPlaces].sort((a, b) => {
+        const pa = getCityOptionPriority(a);
+        const pb = getCityOptionPriority(b);
+        if (pa !== pb) return pa - pb;
+        return String(a?.name || '').localeCompare(String(b?.name || ''));
+    });
+
     const getSetupMissingFields = () => {
         const missing = [];
         if (useTravelDates) {
@@ -2268,7 +2297,7 @@ function App() {
                                                             value=""
                                                         >
                                                             <option value="" disabled>--- Choose a City ---</option>
-                                                            {allPlaces.map(p => (
+                                                            {sortedCityOptions.map(p => (
                                                                 <option key={p.id} value={p.id}>{p.name}</option>
                                                             ))}
                                                         </select>
