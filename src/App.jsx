@@ -1083,17 +1083,17 @@ function App() {
                 const subName = typeof sub === 'string' ? sub : (sub?.name || '');
                 const subDesc = typeof sub === 'string' ? '' : (sub?.description || '');
                 const pointLen = (subName + ' ' + subDesc).trim().length;
-                const estimatedLines = Math.max(1, Math.ceil(pointLen / 56));
-                weight = Math.max(0.48, 0.28 + (pointLen / 430) + (estimatedLines * 0.11));
+                const estimatedLines = Math.max(1, Math.ceil(pointLen / 68));
+                weight = Math.max(0.38, 0.22 + (pointLen / 520) + (estimatedLines * 0.09));
             } else if (item.type === 'city-note-point') {
                 const noteLen = (item.text || '').trim().length;
                 // First city-note line also carries the visual box title/container overhead.
                 if (item.isFirst) {
-                    const estimatedLines = Math.max(1, Math.ceil(noteLen / 58));
-                    weight = Math.max(0.68, 0.42 + (noteLen / 400) + (estimatedLines * 0.1));
+                    const estimatedLines = Math.max(1, Math.ceil(noteLen / 70));
+                    weight = Math.max(0.56, 0.34 + (noteLen / 460) + (estimatedLines * 0.08));
                 } else {
-                    const estimatedLines = Math.max(1, Math.ceil(noteLen / 58));
-                    weight = Math.max(0.42, 0.26 + (noteLen / 470) + (estimatedLines * 0.07));
+                    const estimatedLines = Math.max(1, Math.ceil(noteLen / 70));
+                    weight = Math.max(0.34, 0.2 + (noteLen / 560) + (estimatedLines * 0.05));
                 }
             }
             return weight;
@@ -1220,15 +1220,19 @@ function App() {
     const openPreviewWithValidation = async () => {
         if (isPreparingPreview || isGenerating) return;
         setIsPreparingPreview(true);
-        let scale = Math.max(1, Number(itineraryPdfScale) || 1);
+        let scale = 1;
+        let passed = false;
         let lastError = null;
 
         try {
+            if (itineraryPdfScale !== 1) {
+                setItineraryPdfScale(1);
+            }
             await waitForRenderTick(240);
 
-            for (let attempt = 0; attempt < 7; attempt++) {
+            for (let attempt = 0; attempt < 10; attempt++) {
                 if (attempt > 0) {
-                    scale = Number((scale * 1.12).toFixed(3));
+                    scale = Number((scale * 1.05).toFixed(3));
                     setItineraryPdfScale(scale);
                     await waitForRenderTick(260);
                 }
@@ -1241,6 +1245,7 @@ function App() {
                 try {
                     await waitForFontsAndImages(container);
                     ensurePdfLayoutValid(container, 'Itinerary Preview');
+                    passed = true;
                     setShowPreview(true);
                     return;
                 } catch (err) {
@@ -1265,9 +1270,7 @@ function App() {
                 tone: 'error',
             });
         } finally {
-            if (scale !== itineraryPdfScale) {
-                setItineraryPdfScale(scale);
-            }
+            setItineraryPdfScale(passed ? scale : 1);
             setIsPreparingPreview(false);
         }
     };
@@ -1289,12 +1292,16 @@ function App() {
         // Higher delay to ensure all dynamic content and images are fully rendered
         setTimeout(async () => {
             try {
-                let scale = Math.max(1, Number(itineraryPdfScale) || 1);
+                let scale = 1;
                 let lastError = null;
+                if (itineraryPdfScale !== 1) {
+                    setItineraryPdfScale(1);
+                    await waitForRenderTick(220);
+                }
 
-                for (let attempt = 0; attempt < 7; attempt++) {
+                for (let attempt = 0; attempt < 10; attempt++) {
                     if (attempt > 0) {
-                        scale = Number((scale * 1.12).toFixed(3));
+                        scale = Number((scale * 1.05).toFixed(3));
                         setItineraryPdfScale(scale);
                         await waitForRenderTick(220);
                     }
@@ -1328,9 +1335,7 @@ function App() {
                             return;
                         }
 
-                        if (scale !== itineraryPdfScale) {
-                            setItineraryPdfScale(scale);
-                        }
+                        setItineraryPdfScale(scale);
                         return;
                     } catch (attemptError) {
                         lastError = attemptError;
@@ -1358,6 +1363,9 @@ function App() {
                     tone: 'error',
                 });
             } finally {
+                if (!showPreview) {
+                    setItineraryPdfScale(1);
+                }
                 setIsGenerating(false);
             }
         }, 1500);
